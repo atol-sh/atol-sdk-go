@@ -1,0 +1,255 @@
+syntax = "proto3";
+
+package atol.api.v1;
+
+option go_package = "atol.sh/sdk-go/gen/go/atol/api/v1;apiv1";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// DPAgentService is the data plane agent API. Agents running alongside
+// application workloads call GetBootstrapSnapshot on startup to fetch the
+// full authorization model, tuples, policy bundle, and data, then stream
+// decision logs back to the control plane.
+service DPAgentService {
+  // GetBootstrapSnapshot returns everything an agent needs to initialize:
+  // the authorization model, all tuples, the active OPA policy bundle,
+  // policy data, and a continuation token for incremental updates.
+  rpc GetBootstrapSnapshot(GetBootstrapSnapshotRequest) returns (GetBootstrapSnapshotResponse);
+
+  // IngestDecisionLogs accepts a stream of decision logs from the agent
+  // and persists them for audit and analytics.
+  rpc IngestDecisionLogs(stream IngestDecisionLogsRequest) returns (IngestDecisionLogsResponse);
+
+  // StreamMutations opens a server-streaming connection that pushes
+  // real-time mutations (tuple writes/deletes, model updates, policy updates)
+  // to connected SDK instances after bootstrap.
+  rpc StreamMutations(StreamMutationsRequest) returns (stream StreamMutationsResponse);
+
+  // GetSessionDeviceSnapshot returns the device bound to a session (keyed by
+  // the token's jti) so the SDK can compare live per-request server-side
+  // signals against it locally, without a round trip per request.
+  rpc GetSessionDeviceSnapshot(GetSessionDeviceSnapshotRequest) returns (GetSessionDeviceSnapshotResponse);
+
+  // ReportDeviceDivergence accepts a low-volume stream of divergence events:
+  // a token presented with server-side signals (JA4 / UA / IP) that differ
+  // from the session's bound device, or with no client fingerprint at all.
+  // Each becomes a session.device_mismatch timeline event and, for an unknown
+  // client, a server-signal device profile.
+  rpc ReportDeviceDivergence(stream ReportDeviceDivergenceRequest) returns (ReportDeviceDivergenceResponse);
+}
+
+// GetSessionDeviceSnapshotRequest looks up the device bound to a session.
+message GetSessionDeviceSnapshotRequest {
+  // Organization the session belongs to.
+  string org_id = 1;
+  // Session identifier (the token's jti claim).
+  string session_id = 2;
+}
+
+// GetSessionDeviceSnapshotResponse is the bound-device snapshot the SDK caches
+// per session and compares live request signals against.
+message GetSessionDeviceSnapshotResponse {
+  // Whether a device is bound to the session.
+  bool found = 1;
+  // Bound device identifier.
+  string device_id = 2;
+  // Bound device's server TLS fingerprint (may be empty for client-only devices).
+  string ja4 = 3;
+  // Bound device's user-agent family.
+  string user_agent = 4;
+  // Bound device platform (e.g. "macos", "windows").
+  string platform = 5;
+  // Bound device browser family (e.g. "chrome").
+  string browser_family = 6;
+}
+
+// ReportDeviceDivergenceRequest wraps a single divergence event for streaming.
+message ReportDeviceDivergenceRequest {
+  DeviceDivergenceEvent event = 1;
+}
+
+// DeviceDivergenceEvent reports that a token was presented with server-side
+// signals that diverge from the session's bound device.
+message DeviceDivergenceEvent {
+  // Organization the session belongs to.
+  string org_id = 1;
+  // Session identifier (the token's jti claim).
+  string session_id = 2;
+  // User the session belongs to.
+  string user_id = 3;
+  // Device the session was bound to at login.
+  string bound_device_id = 4;
+  // Live server TLS fingerprint observed on this request.
+  string observed_ja4 = 5;
+  // Live user-agent observed on this request.
+  string observed_user_agent = 6;
+  // Live client IP observed on this request.
+  string observed_ip = 7;
+  // What diverged: "ja4", "user_agent", "ip", or "no_fingerprint".
+  string divergence_kind = 8;
+  // When the divergence was observed.
+  google.protobuf.Timestamp observed_at = 9;
+}
+
+// ReportDeviceDivergenceResponse summarizes the divergence ingestion outcome.
+message ReportDeviceDivergenceResponse {
+  // Number of divergence events accepted.
+  int32 accepted = 1;
+  // Number rejected (e.g. validation failures).
+  int32 rejected = 2;
+}
+
+// GetBootstrapSnapshotRequest fetches the full snapshot for an organization.
+message GetBootstrapSnapshotRequest {
+  // Organization to bootstrap for.
+  string org_id = 1;
+}
+
+// GetBootstrapSnapshotResponse contains the full authorization and policy state.
+message GetBootstrapSnapshotResponse {
+  // Authorization model in FGA DSL format.
+  string authorization_model = 1;
+
+  // All authorization tuples for the organization.
+  repeated Tuple tuples = 2;
+
+  // Active OPA policy bundle (tar.gz).
+  bytes policy_bundle = 3;
+
+  // OPA data tree content.
+  google.protobuf.Struct policy_data = 4;
+
+  // Token for requesting incremental updates after bootstrap.
+  string continuation_token = 5;
+
+  // Version of the active policy bundle (auto-incrementing).
+  int32 policy_bundle_version = 6;
+
+  // Highest version among all policy data paths.
+  int32 policy_data_version = 7;
+}
+
+// Tuple is an authorization relationship triple.
+message Tuple {
+  // User identifier in "type:id" format.
+  string user = 1;
+
+  // Relation name.
+  string relation = 2;
+
+  // Object identifier in "type:id" format.
+  string object = 3;
+}
+
+// IngestDecisionLogsRequest wraps a single decision log entry for streaming.
+message IngestDecisionLogsRequest {
+  // The decision log entry.
+  DecisionLog log = 1;
+}
+
+// DecisionLog records a single authorization decision made by an agent.
+message DecisionLog {
+  // Organization this decision belongs to.
+  string org_id = 1;
+
+  // Unique request identifier for correlation.
+  string request_id = 2;
+
+  // When the decision was made.
+  google.protobuf.Timestamp timestamp = 3;
+
+  // SPIFFE ID or identity of the actor making the request.
+  string actor_identity = 4;
+
+  // Authentication method used: "oidc", "spiffe", "api_key".
+  string auth_method = 5;
+
+  // Action being authorized (e.g., "read", "write", "delete").
+  string action = 6;
+
+  // Resource being accessed (e.g., "document:readme").
+  string resource = 7;
+
+  // Whether the request was allowed.
+  bool allowed = 8;
+
+  // OPA rule or Zanzibar check that determined the decision.
+  string matched_rule = 9;
+
+  // Evaluation latency in microseconds.
+  int32 eval_us = 10;
+
+  // Number of Zanzibar calls made during evaluation.
+  int32 zanzibar_calls = 11;
+
+  // Additional decision context (e.g., matched conditions).
+  google.protobuf.Struct context = 12;
+}
+
+// IngestDecisionLogsResponse summarizes the ingestion outcome.
+message IngestDecisionLogsResponse {
+  // Number of decision logs successfully accepted.
+  int32 accepted = 1;
+
+  // Number of decision logs rejected (e.g., validation failures).
+  int32 rejected = 2;
+}
+
+// StreamMutationsRequest initiates a mutation stream for an organization.
+message StreamMutationsRequest {
+  // Organization to stream mutations for.
+  string org_id = 1;
+
+  // Continuation token from bootstrap or previous stream.
+  string continuation_token = 2;
+}
+
+// StreamMutationsResponse wraps a single mutation event.
+message StreamMutationsResponse {
+  // The mutation that occurred.
+  oneof mutation {
+    TupleWrite tuple_write = 1;
+    TupleDelete tuple_delete = 2;
+    ModelUpdate model_update = 3;
+    PolicyBundleUpdate policy_bundle_update = 4;
+    PolicyDataUpdate policy_data_update = 5;
+  }
+
+  // Updated continuation token after this mutation.
+  string continuation_token = 6;
+}
+
+// TupleWrite indicates a new authorization tuple was written.
+message TupleWrite {
+  Tuple tuple = 1;
+}
+
+// TupleDelete indicates an authorization tuple was removed.
+message TupleDelete {
+  Tuple tuple = 1;
+}
+
+// ModelUpdate indicates the authorization model was updated.
+message ModelUpdate {
+  // The new authorization model in YAML format.
+  string authorization_model = 1;
+}
+
+// PolicyBundleUpdate indicates a new policy bundle was activated.
+message PolicyBundleUpdate {
+  // The new policy bundle (tar.gz).
+  bytes policy_bundle = 1;
+  // New bundle version.
+  int32 version = 2;
+}
+
+// PolicyDataUpdate indicates policy data was changed.
+message PolicyDataUpdate {
+  // The data path that changed.
+  string path = 1;
+  // The new data value.
+  google.protobuf.Struct data = 2;
+  // New data version.
+  int32 version = 3;
+}

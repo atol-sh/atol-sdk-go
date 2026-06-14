@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go build + vet + test + vulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test -race -count=1 -timeout=120s ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: License audit (Apache 2.0 / MIT / BSD only)
+        run: |
+          go install github.com/google/go-licenses@latest
+          # Fail on copyleft. The list matches atol/.github/workflows/ci.yml.
+          go-licenses check ./... \
+            --disallowed_types=forbidden,restricted
+
+  fuzz-smoke:
+    name: Fuzz smoke (30s per target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Fuzz each target (30s)
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkgs=$(grep -rln '^func Fuzz' --include='*_test.go' . \
+            | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+          for pkg in $pkgs; do
+            for target in $(go test -list='^Fuzz' "$pkg" | grep '^Fuzz'); do
+              echo "::group::$pkg $target"
+              go test -run='^$' -fuzz="^${target}\$" -fuzztime=30s "$pkg"
+              echo "::endgroup::"
+            done
+          done
