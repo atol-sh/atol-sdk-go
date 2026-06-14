@@ -4,6 +4,23 @@
 // 	protoc        (unknown)
 // source: atol/api/v1/access.proto
 
+// Package atol.api.v1 is the public, SDK-facing contract for the Atol identity
+// and authorization platform (https://atol.sh).
+//
+// It contains only the data-plane surface that embedded SDKs consume:
+//
+// - **AccessService** writes relationship tuples back to the control plane.
+// - **DPAgentService** delivers bootstrap snapshots, ingests decision logs,
+//   streams live mutations, and reports device divergences.
+//
+// Authorization *reads* are served locally by the SDK from its bootstrapped
+// in-memory store; only writes and control-plane synchronization use these
+// RPCs. Internal admin APIs (org, user, trust, policy, audit) are intentionally
+// excluded from this package.
+//
+// Identifiers follow Zanzibar conventions: subjects and objects are written as
+// `type:id` (for example `user:alice`, `document:readme`).
+
 package apiv1
 
 import (
@@ -21,13 +38,20 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// GrantAccessRequest describes one relationship tuple to create.
 type GrantAccessRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	User          string                 `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
-	Relation      string                 `protobuf:"bytes,3,opt,name=relation,proto3" json:"relation,omitempty"`
-	Object        string                 `protobuf:"bytes,4,opt,name=object,proto3" json:"object,omitempty"`
-	Condition     string                 `protobuf:"bytes,5,opt,name=condition,proto3" json:"condition,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Organization (tenant) that owns the tuple.
+	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// Subject of the relationship in `type:id` form, e.g. `user:alice`.
+	User string `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
+	// Relation name as defined in the authorization model, e.g. `editor`.
+	Relation string `protobuf:"bytes,3,opt,name=relation,proto3" json:"relation,omitempty"`
+	// Object the relation applies to in `type:id` form, e.g. `document:readme`.
+	Object string `protobuf:"bytes,4,opt,name=object,proto3" json:"object,omitempty"`
+	// Optional condition expression that gates the tuple. When empty, the tuple
+	// applies unconditionally.
+	Condition     string `protobuf:"bytes,5,opt,name=condition,proto3" json:"condition,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -97,6 +121,8 @@ func (x *GrantAccessRequest) GetCondition() string {
 	return ""
 }
 
+// GrantAccessResponse is returned on a successful grant. It is intentionally
+// empty: success is signaled by the absence of an error.
 type GrantAccessResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -133,12 +159,17 @@ func (*GrantAccessResponse) Descriptor() ([]byte, []int) {
 	return file_atol_api_v1_access_proto_rawDescGZIP(), []int{1}
 }
 
+// RevokeAccessRequest identifies one relationship tuple to remove.
 type RevokeAccessRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	User          string                 `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
-	Relation      string                 `protobuf:"bytes,3,opt,name=relation,proto3" json:"relation,omitempty"`
-	Object        string                 `protobuf:"bytes,4,opt,name=object,proto3" json:"object,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Organization (tenant) that owns the tuple.
+	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// Subject of the relationship in `type:id` form, e.g. `user:alice`.
+	User string `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
+	// Relation name as defined in the authorization model, e.g. `editor`.
+	Relation string `protobuf:"bytes,3,opt,name=relation,proto3" json:"relation,omitempty"`
+	// Object the relation applies to in `type:id` form, e.g. `document:readme`.
+	Object        string `protobuf:"bytes,4,opt,name=object,proto3" json:"object,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +232,8 @@ func (x *RevokeAccessRequest) GetObject() string {
 	return ""
 }
 
+// RevokeAccessResponse is returned on a successful revoke. It is intentionally
+// empty: success is signaled by the absence of an error.
 type RevokeAccessResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -257,7 +290,8 @@ const file_atol_api_v1_access_proto_rawDesc = "" +
 	"\x14RevokeAccessResponse2\xb6\x01\n" +
 	"\rAccessService\x12P\n" +
 	"\vGrantAccess\x12\x1f.atol.api.v1.GrantAccessRequest\x1a .atol.api.v1.GrantAccessResponse\x12S\n" +
-	"\fRevokeAccess\x12 .atol.api.v1.RevokeAccessRequest\x1a!.atol.api.v1.RevokeAccessResponseB)Z'atol.sh/sdk-go/gen/go/atol/api/v1;apiv1b\x06proto3"
+	"\fRevokeAccess\x12 .atol.api.v1.RevokeAccessRequest\x1a!.atol.api.v1.RevokeAccessResponseB\x95\x01\n" +
+	"\x0fcom.atol.api.v1B\vAccessProtoP\x01Z'atol.sh/sdk-go/gen/go/atol/api/v1;apiv1\xa2\x02\x03AAX\xaa\x02\vAtol.Api.V1\xca\x02\vAtol\\Api\\V1\xe2\x02\x17Atol\\Api\\V1\\GPBMetadata\xea\x02\rAtol::Api::V1b\x06proto3"
 
 var (
 	file_atol_api_v1_access_proto_rawDescOnce sync.Once

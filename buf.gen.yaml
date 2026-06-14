@@ -1,8 +1,21 @@
 version: v2
+# Generated stubs are sourced from the canonical proto contract published at
+# buf.build/atol-sh/atol-protos (repo: github.com/atol-sh/atol-protos).
+# Run `buf generate` to refresh ./gen from the latest published module.
+inputs:
+  - module: buf.build/atol-sh/atol-protos
+# Override go_package back to this SDK's module so import paths and the
+# committed gen/ tree stay stable. Applies to the single atol.api.v1 package.
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      value: atol.sh/sdk-go/gen/go/atol/api/v1;apiv1
+# Local plugins (no BSR token needed); versions are pinned in CI to match go.mod.
 plugins:
-  - remote: buf.build/protocolbuffers/go
+  - local: protoc-gen-go
     out: gen/go
     opt: paths=source_relative
-  - remote: buf.build/connectrpc/go
+  - local: protoc-gen-connect-go
     out: gen/go
     opt: paths=source_relative

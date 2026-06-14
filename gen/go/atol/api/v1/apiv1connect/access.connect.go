@@ -2,6 +2,22 @@
 //
 // Source: atol/api/v1/access.proto
 
+// Package atol.api.v1 is the public, SDK-facing contract for the Atol identity
+// and authorization platform (https://atol.sh).
+//
+// It contains only the data-plane surface that embedded SDKs consume:
+//
+//   - **AccessService** writes relationship tuples back to the control plane.
+//   - **DPAgentService** delivers bootstrap snapshots, ingests decision logs,
+//     streams live mutations, and reports device divergences.
+//
+// Authorization *reads* are served locally by the SDK from its bootstrapped
+// in-memory store; only writes and control-plane synchronization use these
+// RPCs. Internal admin APIs (org, user, trust, policy, audit) are intentionally
+// excluded from this package.
+//
+// Identifiers follow Zanzibar conventions: subjects and objects are written as
+// `type:id` (for example `user:alice`, `document:readme`).
 package apiv1connect
 
 import (
@@ -43,7 +59,12 @@ const (
 
 // AccessServiceClient is a client for the atol.api.v1.AccessService service.
 type AccessServiceClient interface {
+	// GrantAccess creates a single relationship tuple, establishing a relation
+	// between a subject and an object. Granting a tuple that already exists is a
+	// no-op and succeeds.
 	GrantAccess(context.Context, *connect.Request[v1.GrantAccessRequest]) (*connect.Response[v1.GrantAccessResponse], error)
+	// RevokeAccess removes a single relationship tuple. It is idempotent:
+	// revoking a tuple that does not exist succeeds without error.
 	RevokeAccess(context.Context, *connect.Request[v1.RevokeAccessRequest]) (*connect.Response[v1.RevokeAccessResponse], error)
 }
 
@@ -91,7 +112,12 @@ func (c *accessServiceClient) RevokeAccess(ctx context.Context, req *connect.Req
 
 // AccessServiceHandler is an implementation of the atol.api.v1.AccessService service.
 type AccessServiceHandler interface {
+	// GrantAccess creates a single relationship tuple, establishing a relation
+	// between a subject and an object. Granting a tuple that already exists is a
+	// no-op and succeeds.
 	GrantAccess(context.Context, *connect.Request[v1.GrantAccessRequest]) (*connect.Response[v1.GrantAccessResponse], error)
+	// RevokeAccess removes a single relationship tuple. It is idempotent:
+	// revoking a tuple that does not exist succeeds without error.
 	RevokeAccess(context.Context, *connect.Request[v1.RevokeAccessRequest]) (*connect.Response[v1.RevokeAccessResponse], error)
 }
 

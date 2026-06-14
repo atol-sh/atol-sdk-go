@@ -40,6 +40,35 @@ jobs:
           go-licenses check ./... \
             --disallowed_types=forbidden,restricted
 
+  proto:
+    name: Proto stubs in sync with BSR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pin codegen plugins to the exact versions this module depends on so
+      # regeneration is byte-reproducible against the committed gen/.
+      - name: Install codegen plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@"$(go list -m -f '{{.Version}}' google.golang.org/protobuf)"
+          go install connectrpc.com/connect/cmd/protoc-gen-connect-go@"$(go list -m -f '{{.Version}}' connectrpc.com/connect)"
+
+      - name: Regenerate from buf.build/atol-sh/atol-protos
+        run: buf generate
+
+      - name: Fail if gen/ is out of sync
+        run: |
+          if ! git diff --exit-code -- gen/; then
+            echo "::error::gen/ is out of sync with buf.build/atol-sh/atol-protos. Run 'buf generate' and commit the result." >&2
+            exit 1
+          fi
+
   fuzz-smoke:
     name: Fuzz smoke (30s per target)
     runs-on: ubuntu-latest
