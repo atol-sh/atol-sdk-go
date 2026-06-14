@@ -605,13 +605,20 @@ type mockDPAgentHandler struct {
 	mutations []*apiv1.StreamMutationsResponse
 }
 
-func (h *mockDPAgentHandler) StreamMutations(_ context.Context, _ *connect.Request[apiv1.StreamMutationsRequest], stream *connect.ServerStream[apiv1.StreamMutationsResponse]) error {
+func (h *mockDPAgentHandler) StreamMutations(ctx context.Context, _ *connect.Request[apiv1.StreamMutationsRequest], stream *connect.ServerStream[apiv1.StreamMutationsResponse]) error {
 	for _, m := range h.mutations {
 		if err := stream.Send(m); err != nil {
 			return err
 		}
 	}
-	return nil
+	// Model a long-lived stream: after sending the current mutations, hold the
+	// connection open until the client disconnects. Returning here instead
+	// would cause Run to reconnect immediately (clean EOF) and this handler to
+	// replay the full mutation list from the start, re-applying a partial
+	// prefix (e.g. the write without the delete) and racing the test's
+	// post-cancel assertions.
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 // refusingDPAgentHandler implements DPAgentService with configurable
