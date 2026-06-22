@@ -196,6 +196,32 @@ export ATOL_ORG_ID=org_01JQXYZ      # from dashboard Settings > General
 
 **JWT validation:** User tokens issued by atol.sh are validated locally via JWKS. The SDK caches the signing keys and refreshes them automatically.
 
+### What the SDK stores (and what it doesn't)
+
+Everything the SDK holds is an **in-memory replica** of control-plane state. There is no SDK-side
+database, nothing is written to disk, and there is no store to configure. If the process restarts,
+it rebuilds on the next `Bootstrap()` and replays anything it missed — so there is nothing local to
+back up.
+
+| Held in the SDK | Source of truth | Kept fresh by |
+|-----------------|-----------------|---------------|
+| Relationship tuples + authorization model | atol.sh control plane | bootstrap snapshot, then live mutation stream |
+| OPA policy bundle + policy data | atol.sh control plane | bootstrap, then live mutation stream |
+| Revoked-session list (CRL) | atol.sh control plane | polled every 30s |
+| JWKS signing keys | atol.sh control plane | fetched on demand, auto-refreshed |
+| Decision logs | not stored — shipped out | async flush to atol.sh; dropped if the buffer is full |
+| Materialized tuples | **your** application's database | your `RegisterMaterializer` callbacks; **never sent to atol.sh** |
+
+Two consequences worth knowing:
+
+- **The store is deliberately not pluggable** (there is no `WithStore` option). The in-memory store
+  is a throwaway replica of control-plane state; injecting your own backend would mean
+  reimplementing the bootstrap and sync contract. App-specific relationships have their own path in —
+  `RegisterMaterializer` and [context tuples](#context-tuples) — and that data stays in your process.
+- **Your data stays yours.** A decision is computed locally and never round-trips. Only writes
+  (grant/revoke) and audit events go to the control plane; materialized tuples derived from your own
+  data never leave the process.
+
 ## Authentication
 
 Atol is also your identity provider. Your frontend redirects users to atol.sh for login (OIDC Authorization Code flow), and your backend validates the resulting JWT with the SDK middleware.
