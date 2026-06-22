@@ -18,6 +18,9 @@ import (
 // Result contains the bootstrap state and continuation token.
 type Result struct {
 	ContinuationToken string
+	// PolicyData is the dynamic policy-data overlay loaded at bootstrap. The
+	// sync client re-applies it on bundle swaps so it is not wiped (ADR 0022).
+	PolicyData map[string]any
 }
 
 // Bootstrap fetches state from the control plane and loads it into the engines.
@@ -60,12 +63,12 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 		}
 	}
 
-	// Load policy bundle.
+	// Load policy bundle with the dynamic data overlay.
+	var policyData map[string]any
+	if snap.PolicyData != nil {
+		policyData = snap.PolicyData.AsMap()
+	}
 	if len(snap.PolicyBundle) > 0 {
-		var policyData map[string]any
-		if snap.PolicyData != nil {
-			policyData = snap.PolicyData.AsMap()
-		}
 		if err := policyEngine.LoadBundle(snap.PolicyBundle, policyData); err != nil {
 			return nil, fmt.Errorf("load policy bundle: %w", err)
 		}
@@ -73,5 +76,6 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 
 	return &Result{
 		ContinuationToken: snap.ContinuationToken,
+		PolicyData:        policyData,
 	}, nil
 }

@@ -71,6 +71,24 @@ type Config struct {
 	// clients are on a DPoP-capable SDK. Corresponds to the issuer's
 	// `dpopMode: required` setting.
 	RequireDPoP bool
+
+	// MaxStaleness is the opt-in budget for the staleness gate (ADR 0018).
+	// When zero (default) the gate is off and reads keep their existing
+	// fail-open-on-partition behavior. When set, a synced instance whose
+	// stream has been disconnected longer than this budget is treated as
+	// stale and handled per StalenessMode. Prefer WithMaxStaleness to set
+	// both fields together.
+	MaxStaleness time.Duration
+
+	// StalenessMode selects how a stale read is handled. The zero value
+	// (StalenessOff) disables the gate even if MaxStaleness is set.
+	StalenessMode StalenessMode
+
+	// BootstrapInterval forces a periodic full re-bootstrap to bound policy
+	// age (ADR 0018). Zero (default) disables it. It runs on its own
+	// lifecycle, independent of live sync, so it bounds policy age even when
+	// DisableSync is set. Prefer WithBootstrapInterval.
+	BootstrapInterval time.Duration
 }
 
 // defaults sets default values for zero-value fields.

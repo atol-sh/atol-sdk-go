@@ -7,15 +7,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	"connectrpc.com/connect"
 	"go.uber.org/zap"
 
-	"atol.sh/sdk-go/bootstrap"
 	"atol.sh/sdk-go/decision"
 	"atol.sh/sdk-go/device"
-	apiv1 "atol.sh/sdk-go/gen/go/atol/api/v1"
 	"atol.sh/sdk-go/gen/go/atol/api/v1/apiv1connect"
 	hmacpkg "atol.sh/sdk-go/hmac"
 	"atol.sh/sdk-go/internal/safeconv"
@@ -43,84 +42,47 @@ type Atol struct {
 	decisionLogger   *decision.Logger
 	materializers    *materializerRegistry
 	tupleWriter      tupleWriter // strategy for GrantAccess/RevokeAccess persistence
-	syncClient       *atolsync.Client
-	syncCancel       context.CancelFunc
-	drift            *device.DriftDetector // session-device drift detection; nil when device intelligence disabled
-	logger           *zap.Logger
-}
 
-// tupleWriter abstracts tuple persistence so tests can write locally
-// while production writes through to the control plane.
-type tupleWriter interface {
-	grant(ctx context.Context, user, relation, object string) error
-	revoke(ctx context.Context, user, relation, object string) error
-}
+	// syncClient is published from Bootstrap (one goroutine) and read from
+	// request goroutines, so it is an atomic.Pointer (ADR 0018). A nil load
+	// means no live sync client is installed -- never inferred as a mode.
+	syncClient atomic.Pointer[atolsync.Client]
+	syncCancel context.CancelFunc
 
-// remoteTupleWriter writes tuples to the control plane and mirrors locally.
-type remoteTupleWriter struct {
-	client  apiv1connect.AccessServiceClient
-	storeID string
-	zEngine *zanzibar.Engine
-}
+	// bootstrapped flips true once Bootstrap completes, distinguishing
+	// modeUninitialized (gate-as-stale) from modeLive without inferring from
+	// syncClient == nil.
+	bootstrapped atomic.Bool
+	// localOnly records WithLocalOnly so the gate and SyncStatus can report
+	// modeLocal without inferring it from a nil sync client.
+	localOnly bool
 
-func (w *remoteTupleWriter) grant(ctx context.Context, user, relation, object string) error {
-	_, err := w.client.GrantAccess(ctx, connect.NewRequest(&apiv1.GrantAccessRequest{
-		OrgId:    w.storeID,
-		User:     user,
-		Relation: relation,
-		Object:   object,
-	}))
-	if err != nil {
-		return fmt.Errorf("grant access: %w", err)
-	}
-	if err := w.zEngine.WriteRawTuple(ctx, user, relation, object); err != nil {
-		return fmt.Errorf("remote grant succeeded but local mirror failed for %s#%s@%s: %w", object, relation, user, err)
-	}
-	return nil
-}
+	// bgCancel stops the WithBootstrapInterval ticker. It is independent of
+	// syncCancel because the ticker must run even when DisableSync is set.
+	bgCancel context.CancelFunc
 
-func (w *remoteTupleWriter) revoke(ctx context.Context, user, relation, object string) error {
-	_, err := w.client.RevokeAccess(ctx, connect.NewRequest(&apiv1.RevokeAccessRequest{
-		OrgId:    w.storeID,
-		User:     user,
-		Relation: relation,
-		Object:   object,
-	}))
-	if err != nil {
-		return fmt.Errorf("revoke access: %w", err)
-	}
-	if err := w.zEngine.DeleteRawTuple(ctx, user, relation, object); err != nil {
-		return fmt.Errorf("remote revoke succeeded but local mirror failed for %s#%s@%s: %w", object, relation, user, err)
-	}
-	return nil
-}
+	// bootstrapAtMu guards bootstrapTime, updated on each (re)bootstrap.
+	bootstrapAtMu sync.RWMutex
+	bootstrapTime time.Time
 
-// localTupleWriter writes tuples directly to the in-memory store without
-// contacting the control plane. Used by the atoltest package.
-type localTupleWriter struct {
-	zEngine *zanzibar.Engine
-}
+	// metrics holds the caller-supplied Prometheus collectors, or nil when
+	// WithMetrics was not used.
+	metrics *syncMetrics
 
-func (w *localTupleWriter) grant(ctx context.Context, user, relation, object string) error {
-	if err := w.zEngine.WriteRawTuple(ctx, user, relation, object); err != nil {
-		return fmt.Errorf("local grant: %w", err)
-	}
-	return nil
-}
-
-func (w *localTupleWriter) revoke(ctx context.Context, user, relation, object string) error {
-	if err := w.zEngine.DeleteRawTuple(ctx, user, relation, object); err != nil {
-		return fmt.Errorf("local revoke: %w", err)
-	}
-	return nil
+	drift  *device.DriftDetector // session-device drift detection; nil when device intelligence disabled
+	logger *zap.Logger
 }
 
 // NewOption configures SDK construction.
 type NewOption func(*newOptions)
 
 type newOptions struct {
-	localOnly bool
-	logger    *zap.Logger
+	localOnly         bool
+	logger            *zap.Logger
+	metricsReg        prometheusRegisterer
+	maxStaleness      *time.Duration
+	stalenessMode     *StalenessMode
+	bootstrapInterval *time.Duration
 }
 
 // WithLocalOnly creates an SDK instance that writes tuples directly to the
@@ -167,6 +129,18 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	logger := no.logger
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+
+	// Apply staleness/bootstrap-interval options onto the config before
+	// defaults so explicit options win.
+	if no.maxStaleness != nil {
+		config.MaxStaleness = *no.maxStaleness
+	}
+	if no.stalenessMode != nil {
+		config.StalenessMode = *no.stalenessMode
+	}
+	if no.bootstrapInterval != nil {
+		config.BootstrapInterval = *no.bootstrapInterval
 	}
 
 	config.defaults()
@@ -242,7 +216,16 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 		driftDetector = device.NewDriftDetector(dpClient, device.DriftConfig{})
 	}
 
-	return &Atol{
+	var metrics *syncMetrics
+	if no.metricsReg != nil {
+		m, err := newSyncMetrics(no.metricsReg)
+		if err != nil {
+			return nil, fmt.Errorf("register sync metrics: %w", err)
+		}
+		metrics = m
+	}
+
+	a := &Atol{
 		config:           config,
 		httpClient:       httpClient,
 		zanzibar:         zanzibarEngine,
@@ -254,9 +237,22 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 		decisionLogger:   decisionLogger,
 		materializers:    newMaterializerRegistry(zanzibarStore),
 		tupleWriter:      tw,
+		localOnly:        no.localOnly,
+		metrics:          metrics,
 		drift:            driftDetector,
 		logger:           logger,
-	}, nil
+	}
+
+	// Start the periodic re-bootstrap ticker if configured. It runs on its
+	// own lifecycle, independent of live sync, so it bounds policy age even
+	// when DisableSync is set.
+	if config.BootstrapInterval > 0 {
+		bgCtx, cancel := context.WithCancel(context.Background())
+		a.bgCancel = cancel
+		go a.runBootstrapInterval(bgCtx, config.BootstrapInterval)
+	}
+
+	return a, nil
 }
 
 // DriftDetector returns the session-device drift detector, or nil when device
@@ -269,6 +265,9 @@ func (a *Atol) DriftDetector() *device.DriftDetector {
 func (a *Atol) Close() {
 	if a.syncCancel != nil {
 		a.syncCancel()
+	}
+	if a.bgCancel != nil {
+		a.bgCancel()
 	}
 	if a.sessionValidator != nil {
 		a.sessionValidator.Stop()
@@ -358,7 +357,7 @@ func (a *Atol) Authorize(ctx context.Context, action, resource string) (*Decisio
 	}
 
 	start := time.Now()
-	result, err := a.policy.Evaluate(ctx, policyengine.EvalInput{
+	result, staleResult, err := a.evaluateGated(ctx, policyengine.EvalInput{
 		User:         "user:" + p.UserID,
 		Relation:     action,
 		Object:       resource,
@@ -369,8 +368,18 @@ func (a *Atol) Authorize(ctx context.Context, action, resource string) (*Decisio
 	evalUs, _ := safeconv.SafeInt32From64(time.Since(start).Microseconds())
 
 	if err != nil {
-		a.logDecision(p.UserID, action, resource, p.AuthMethod, false, "error", evalUs, 0)
+		matched := "error"
+		if errors.Is(err, ErrStale) {
+			matched = "stale-error"
+		}
+		a.logDecision(p.UserID, action, resource, p.AuthMethod, false, matched, evalUs, 0)
 		return nil, fmt.Errorf("evaluate policy: %w", err)
+	}
+
+	if staleResult != nil {
+		// Fail-closed staleness deny: deny-by-default with an auditable entry.
+		a.logStaleDeny(p.UserID, action, resource, p.AuthMethod)
+		return &Decision{Allow: false, Reason: "stale-deny"}, nil
 	}
 
 	a.logDecision(p.UserID, action, resource, p.AuthMethod, result.Allowed, result.MatchedRule, evalUs, result.ZanzibarCalls)
@@ -431,7 +440,7 @@ func (a *Atol) CanWithDetails(ctx context.Context, user, relation, object string
 
 	resourceType, resourceID := parseObject(object)
 	start := time.Now()
-	result, err := a.policy.Evaluate(ctx, policyengine.EvalInput{
+	result, staleResult, err := a.evaluateGated(ctx, policyengine.EvalInput{
 		User:          user,
 		Relation:      relation,
 		Object:        object,
@@ -453,10 +462,18 @@ func (a *Atol) CanWithDetails(ctx context.Context, user, relation, object string
 			AuthMethod: authMethod,
 			EvalUs:     evalUs,
 		}
-		if err != nil {
+		switch {
+		case err != nil:
 			entry.Allowed = false
-			entry.MatchedRule = "error"
-		} else {
+			if errors.Is(err, ErrStale) {
+				entry.MatchedRule = "stale-error"
+			} else {
+				entry.MatchedRule = "error"
+			}
+		case staleResult != nil:
+			entry.Allowed = false
+			entry.MatchedRule = "stale-deny"
+		default:
 			entry.Allowed = result.Allowed
 			entry.MatchedRule = result.MatchedRule
 			entry.ZanzibarCalls = result.ZanzibarCalls
@@ -466,6 +483,9 @@ func (a *Atol) CanWithDetails(ctx context.Context, user, relation, object string
 
 	if err != nil {
 		return nil, fmt.Errorf("evaluate policy: %w", err)
+	}
+	if staleResult != nil {
+		return staleResult, nil
 	}
 	return result, nil
 }
@@ -542,74 +562,6 @@ func parseObject(object string) (string, string) {
 		}
 	}
 	return object, ""
-}
-
-// Bootstrap fetches the initial state (model, tuples, bundle, data) from the control plane.
-func (a *Atol) Bootstrap(ctx context.Context) error {
-	if a.config.ControlPlaneURL == "" {
-		return fmt.Errorf("control plane URL not configured")
-	}
-	if a.config.StoreID == "" {
-		return fmt.Errorf("store ID (org ID) not configured")
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, a.config.BootstrapTimeout)
-	defer cancel()
-
-	result, err := a.bootstrapLoad(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Start live sync to receive real-time mutations from the control plane.
-	if !a.config.DisableSync && result != nil && result.ContinuationToken != "" {
-		a.syncClient = atolsync.NewClient(
-			a.config.ControlPlaneURL,
-			a.config.StoreID,
-			result.ContinuationToken,
-			a.httpClient,
-			a.zanzibar,
-			a.policy,
-			a.logger.Named("sync"),
-			atolsync.WithRebootstrap(a.rebootstrap),
-		)
-		syncCtx, cancel := context.WithCancel(context.Background())
-		a.syncCancel = cancel
-		go a.syncClient.Run(syncCtx)
-	}
-
-	return nil
-}
-
-// bootstrapLoad fetches the full state snapshot (model, tuples, bundle, data)
-// from the control plane, loads it into the embedded engines, and runs all
-// registered materializers.
-func (a *Atol) bootstrapLoad(ctx context.Context) (*bootstrap.Result, error) {
-	result, err := bootstrap.Bootstrap(ctx, a.config.ControlPlaneURL, a.config.StoreID, a.httpClient, a.zanzibar, a.policy)
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap: %w", err)
-	}
-
-	// Run all registered materializers after bootstrap to populate SDK-local tuples.
-	if err := a.materializers.materializeAll(ctx); err != nil {
-		return nil, fmt.Errorf("materialize: %w", err)
-	}
-
-	return result, nil
-}
-
-// rebootstrap is the sync client's recovery path when the control plane
-// refuses the continuation token: it re-runs the full bootstrap load and
-// returns the fresh continuation token from the new snapshot.
-func (a *Atol) rebootstrap(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, a.config.BootstrapTimeout)
-	defer cancel()
-
-	result, err := a.bootstrapLoad(ctx)
-	if err != nil {
-		return "", fmt.Errorf("rebootstrap: %w", err)
-	}
-	return result.ContinuationToken, nil
 }
 
 // logDecision records a decision log entry if the logger is configured.
