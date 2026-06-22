@@ -31,3 +31,25 @@ type TupleStore interface {
 type TupleCounter interface {
 	CountByObjectType(ctx context.Context) (map[string]int64, error)
 }
+
+// ConditionalDeleter is an optional capability for atomically enforcing a
+// minimum-holder floor at delete time (ADR 0016). Stores that back a required
+// relation must implement it; the engine fails loud if a guarded delete hits a
+// store that does not.
+type ConditionalDeleter interface {
+	// DeleteIfAbove deletes t only if the object retains MORE THAN min DIRECT
+	// holders (user_relation == "") of (object, relation). It returns
+	// model.ErrLastHolder if the delete would drop the count to min or below.
+	// Deleting a non-existent tuple is not a floor breach and returns nil.
+	// The count and delete must be atomic against concurrent sibling deletes.
+	DeleteIfAbove(ctx context.Context, t model.Tuple, min int) error
+}
+
+// TupleTxStore is an optional capability for applying a set of writes and
+// deletes in one transaction (ADR 0020). Writes use upsert/idempotent
+// semantics; deletes no-op when absent; the whole set is all-or-nothing.
+type TupleTxStore interface {
+	// WriteTx applies all writes then all deletes in ONE transaction.
+	// Any error rolls back the whole set, leaving the store unchanged.
+	WriteTx(ctx context.Context, writes, deletes []model.Tuple) error
+}

@@ -222,6 +222,104 @@ types:
 	}
 }
 
+func TestCompile_RequiredRelation(t *testing.T) {
+	yaml := []byte(`
+version: "1.0"
+types:
+  user:
+    relations:
+      same_identity:
+        types: [identity]
+  identity:
+    relations:
+      same_identity:
+        types: [user]
+  org:
+    relations:
+      owner:
+        types: [user]
+        required: true
+      member:
+        types: [user]
+`)
+	m, err := Compile(yaml)
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+
+	owner := m.Types["org"].Relations["owner"]
+	if owner == nil {
+		t.Fatal("missing relation: org.owner")
+	}
+	if got, want := owner.MinHolders, 1; got != want {
+		t.Errorf("org.owner MinHolders = %d, want %d", got, want)
+	}
+
+	// A relation without `required` must keep the default floor of 0.
+	member := m.Types["org"].Relations["member"]
+	if member == nil {
+		t.Fatal("missing relation: org.member")
+	}
+	if got, want := member.MinHolders, 0; got != want {
+		t.Errorf("org.member MinHolders = %d, want %d", got, want)
+	}
+}
+
+func TestCompile_RequiredOnUnionRejected(t *testing.T) {
+	yaml := []byte(`
+version: "1.0"
+types:
+  user:
+    relations:
+      same_identity:
+        types: [identity]
+  identity:
+    relations:
+      same_identity:
+        types: [user]
+  org:
+    relations:
+      admin:
+        types: [user]
+      member:
+        types: [user]
+      effective_member:
+        union: [member, admin]
+        required: true
+`)
+	_, err := Compile(yaml)
+	if err == nil {
+		t.Error("expected error for `required` on a union relation, got nil")
+	}
+}
+
+func TestCompile_RequiredOnComputedRejected(t *testing.T) {
+	// A single computed_userset entry (no direct types) is not pure-direct.
+	yaml := []byte(`
+version: "1.0"
+types:
+  user:
+    relations:
+      same_identity:
+        types: [identity]
+  identity:
+    relations:
+      same_identity:
+        types: [user]
+  org:
+    relations:
+      admin:
+        types: [user]
+      effective_admin:
+        union: [admin]
+        required: true
+`)
+	_, err := Compile(yaml)
+	if err == nil {
+		t.Error("expected error for `required` on a computed relation, got nil")
+	}
+}
+
 func TestCompile_DefaultVersion(t *testing.T) {
 	yaml := []byte(`
 types:

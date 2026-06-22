@@ -22,6 +22,10 @@ type yamlRelationDef struct {
 	Types []string `yaml:"types,omitempty"`
 	// Union of other relations or from/lookup rules.
 	Union []yamlUnionEntry `yaml:"union,omitempty"`
+	// Required marks the relation as requiring at least one direct holder on
+	// any object that has one. Compiles to RelationDef.MinHolders = 1. Only
+	// valid on pure-direct relations.
+	Required bool `yaml:"required,omitempty"`
 }
 
 // yamlUnionEntry can be either a string (relation name) or a from/lookup map.
@@ -96,7 +100,7 @@ func Compile(data []byte) (*Model, error) {
 	return m, nil
 }
 
-func compileRelation(_ *Model, _, _ string, raw yamlRelationDef) (*RelationDef, error) {
+func compileRelation(_ *Model, typeName, relName string, raw yamlRelationDef) (*RelationDef, error) {
 	rel := &RelationDef{
 		Name:        "",
 		DirectTypes: raw.Types,
@@ -105,14 +109,11 @@ func compileRelation(_ *Model, _, _ string, raw yamlRelationDef) (*RelationDef, 
 	// If types are specified and no union, this is a direct relation.
 	if len(raw.Types) > 0 && len(raw.Union) == 0 {
 		rel.Rewrites = []RewriteRule{{Direct: true}}
-		return rel, nil
-	}
-
-	// If union is specified, compile each entry. A union relation always
-	// includes its own direct tuples (Zanzibar 'this' semantics) in
-	// addition to each union member: a tuple written directly on the
-	// unioned relation grants it, and so does any member relation.
-	if len(raw.Union) > 0 {
+	} else if len(raw.Union) > 0 {
+		// If union is specified, compile each entry. A union relation always
+		// includes its own direct tuples (Zanzibar 'this' semantics) in
+		// addition to each union member: a tuple written directly on the
+		// unioned relation grants it, and so does any member relation.
 		rel.Rewrites = append(rel.Rewrites, RewriteRule{Direct: true})
 		for _, entry := range raw.Union {
 			if entry.From != "" {
@@ -130,10 +131,22 @@ func compileRelation(_ *Model, _, _ string, raw yamlRelationDef) (*RelationDef, 
 				})
 			}
 		}
-		return rel, nil
+	}
+	// Neither types nor union leaves Rewrites empty — an empty relation that
+	// is valid but does nothing.
+
+	if raw.Required {
+		// A floor is only meaningful and atomically countable over a
+		// pure-direct relation people write tuples to. Every union relation
+		// carries a leading {Direct:true} rewrite plus its members, so a
+		// pure-direct relation is precisely one with a single direct rewrite.
+		if len(rel.Rewrites) != 1 || !rel.Rewrites[0].Direct {
+			return nil, fmt.Errorf("type %q relation %q: 'required' is only valid on a pure-direct relation",
+				typeName, relName)
+		}
+		rel.MinHolders = 1
 	}
 
-	// Neither types nor union — empty relation (valid but does nothing).
 	return rel, nil
 }
 

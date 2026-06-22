@@ -254,7 +254,11 @@ func (e *Engine) WriteTuple(ctx context.Context, user, relation, object string) 
 	return nil
 }
 
-// DeleteTuple removes a relationship tuple.
+// DeleteTuple removes a relationship tuple. If the tuple's relation declares a
+// minimum-holder floor (ADR 0016) and the tuple is direct, the delete is gated
+// so it never strands the object below the floor; the delete then runs through
+// the store's atomic ConditionalDeleter capability, failing loud if the store
+// lacks it. Returns model.ErrLastHolder if the delete would breach the floor.
 func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string) error {
 	userType, userID, userRelation := check.ParseUserKey(user)
 	objectType, objectID := check.ParseObjectKey(object)
@@ -266,6 +270,19 @@ func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string)
 		UserType:     userType,
 		UserID:       userID,
 		UserRelation: userRelation,
+	}
+
+	min := e.minHolders(ctx, objectType, relation)
+	if min >= 1 && t.UserRelation == "" {
+		deleter, ok := e.store.(store.ConditionalDeleter)
+		if !ok {
+			return fmt.Errorf("delete %s#%s@%s: relation requires a minimum-holder floor but store does not implement store.ConditionalDeleter", object, relation, user)
+		}
+		if err := deleter.DeleteIfAbove(ctx, t, min); err != nil {
+			return err
+		}
+		e.notifier.OnTupleDelete(ctx, t)
+		return nil
 	}
 
 	if err := e.store.Delete(ctx, t); err != nil {

@@ -21,6 +21,11 @@ type RelationDef struct {
 	DirectTypes []string
 	// Rewrites defines how this relation is computed.
 	Rewrites []RewriteRule
+	// MinHolders is the minimum number of direct holders the relation must
+	// retain on any object that has one. 0 means no floor; a `required: true`
+	// relation compiles to MinHolders = 1. Only meaningful for pure-direct
+	// relations (see compiler validation).
+	MinHolders int
 }
 
 // RewriteRule defines how a relation is computed.

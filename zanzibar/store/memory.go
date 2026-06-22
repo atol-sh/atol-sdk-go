@@ -42,7 +42,12 @@ func objectRelationKey(objectType, objectID, relation string) string {
 func (s *MemoryStore) Write(_ context.Context, t model.Tuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.writeLocked(t)
+	return nil
+}
 
+// writeLocked inserts t into both indexes. The caller must hold s.mu.
+func (s *MemoryStore) writeLocked(t model.Tuple) {
 	orKey := objectRelationKey(t.ObjectType, t.ObjectID, t.Relation)
 	tk := tupleKey(t)
 
@@ -57,14 +62,17 @@ func (s *MemoryStore) Write(_ context.Context, t model.Tuple) error {
 		s.byUser[userKey] = make(map[string]bool)
 	}
 	s.byUser[userKey][tk] = true
-
-	return nil
 }
 
 func (s *MemoryStore) Delete(_ context.Context, t model.Tuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.deleteLocked(t)
+	return nil
+}
 
+// deleteLocked removes t from both indexes. The caller must hold s.mu.
+func (s *MemoryStore) deleteLocked(t model.Tuple) {
 	orKey := objectRelationKey(t.ObjectType, t.ObjectID, t.Relation)
 	tk := tupleKey(t)
 
@@ -82,7 +90,67 @@ func (s *MemoryStore) Delete(_ context.Context, t model.Tuple) error {
 			delete(s.byUser, userKey)
 		}
 	}
+}
 
+// directHoldersLocked counts the direct holders (user_relation == "") of
+// (objectType, objectID, relation). The caller must hold s.mu.
+func (s *MemoryStore) directHoldersLocked(objectType, objectID, relation string) int {
+	orKey := objectRelationKey(objectType, objectID, relation)
+	tuples, ok := s.byObjectRelation[orKey]
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, t := range tuples {
+		if t.UserRelation == "" {
+			count++
+		}
+	}
+	return count
+}
+
+// DeleteIfAbove deletes t only if the object retains more than min direct
+// holders of (object, relation). It is atomic under the store's write lock:
+// the count and delete happen without releasing s.mu, so concurrent sibling
+// deletes cannot both observe the same pre-delete count. Deleting a tuple that
+// is not present is not a floor breach and returns nil.
+func (s *MemoryStore) DeleteIfAbove(_ context.Context, t model.Tuple, min int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	orKey := objectRelationKey(t.ObjectType, t.ObjectID, t.Relation)
+	tk := tupleKey(t)
+	tuples, ok := s.byObjectRelation[orKey]
+	if !ok {
+		return nil
+	}
+	if _, present := tuples[tk]; !present {
+		// Deleting a missing tuple is not a floor breach.
+		return nil
+	}
+
+	if s.directHoldersLocked(t.ObjectType, t.ObjectID, t.Relation) <= min {
+		return model.ErrLastHolder
+	}
+
+	s.deleteLocked(t)
+	return nil
+}
+
+// WriteTx applies all writes then all deletes under one held write lock,
+// all-or-nothing. The memory store cannot fail mid-mutation, so a precheck of
+// the inputs before any index mutation is sufficient for atomicity; there is no
+// snapshot/restore (which would not consistently restore secondary indexes).
+func (s *MemoryStore) WriteTx(_ context.Context, writes, deletes []model.Tuple) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, t := range writes {
+		s.writeLocked(t)
+	}
+	for _, t := range deletes {
+		s.deleteLocked(t)
+	}
 	return nil
 }
 

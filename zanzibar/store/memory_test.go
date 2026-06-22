@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"atol.sh/sdk-go/zanzibar/model"
@@ -213,4 +214,113 @@ func TestMemoryStore_MaterializedUsersets(t *testing.T) {
 	if len(got) != 1 {
 		t.Errorf("ReadUsersets() returned %d, want 1 (materialized userset)", len(got))
 	}
+}
+
+// orgOwner returns a direct org:acme#owner tuple for the given user id.
+func orgOwner(id string) model.Tuple {
+	return model.Tuple{ObjectType: "org", ObjectID: "acme", Relation: "owner", UserType: "user", UserID: id}
+}
+
+func TestMemoryStore_DeleteIfAbove(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("above floor deletes", func(t *testing.T) {
+		s := NewMemoryStore()
+		s.Write(ctx, orgOwner("alice"))
+		s.Write(ctx, orgOwner("bob"))
+
+		if err := s.DeleteIfAbove(ctx, orgOwner("alice"), 1); err != nil {
+			t.Fatalf("DeleteIfAbove(2 holders, min 1) error: %v, want nil", err)
+		}
+		got, _ := s.Read(ctx, model.TupleFilter{ObjectType: "org", ObjectID: "acme", Relation: "owner"})
+		if len(got) != 1 {
+			t.Errorf("holders after delete = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("at floor refuses", func(t *testing.T) {
+		s := NewMemoryStore()
+		s.Write(ctx, orgOwner("alice"))
+
+		err := s.DeleteIfAbove(ctx, orgOwner("alice"), 1)
+		if !errors.Is(err, model.ErrLastHolder) {
+			t.Fatalf("DeleteIfAbove(1 holder, min 1) error = %v, want ErrLastHolder", err)
+		}
+		got, _ := s.Read(ctx, model.TupleFilter{ObjectType: "org", ObjectID: "acme", Relation: "owner"})
+		if len(got) != 1 {
+			t.Errorf("holders after refused delete = %d, want 1 (tuple preserved)", len(got))
+		}
+	})
+
+	t.Run("missing tuple is not a breach", func(t *testing.T) {
+		s := NewMemoryStore()
+		s.Write(ctx, orgOwner("alice"))
+
+		// Deleting a different (absent) tuple must not error even at the floor.
+		if err := s.DeleteIfAbove(ctx, orgOwner("ghost"), 1); err != nil {
+			t.Fatalf("DeleteIfAbove(missing tuple) error = %v, want nil", err)
+		}
+		got, _ := s.Read(ctx, model.TupleFilter{ObjectType: "org", ObjectID: "acme", Relation: "owner"})
+		if len(got) != 1 {
+			t.Errorf("holders = %d, want 1 (unchanged)", len(got))
+		}
+	})
+
+	t.Run("usersets do not count toward floor", func(t *testing.T) {
+		s := NewMemoryStore()
+		// One direct holder plus one userset holder.
+		s.Write(ctx, orgOwner("alice"))
+		s.Write(ctx, model.Tuple{ObjectType: "org", ObjectID: "acme", Relation: "owner",
+			UserType: "team", UserID: "eng", UserRelation: "member"})
+
+		// Only 1 direct holder, so deleting it breaches the floor of 1.
+		err := s.DeleteIfAbove(ctx, orgOwner("alice"), 1)
+		if !errors.Is(err, model.ErrLastHolder) {
+			t.Fatalf("error = %v, want ErrLastHolder (userset must not pad the direct count)", err)
+		}
+	})
+}
+
+func TestMemoryStore_WriteTx(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("applies writes then deletes", func(t *testing.T) {
+		s := NewMemoryStore()
+		// Seed two tuples that the tx will delete.
+		s.Write(ctx, orgOwner("old1"))
+		s.Write(ctx, orgOwner("old2"))
+
+		writes := []model.Tuple{orgOwner("new1"), orgOwner("new2"), orgOwner("new3")}
+		deletes := []model.Tuple{orgOwner("old1"), orgOwner("old2")}
+
+		if err := s.WriteTx(ctx, writes, deletes); err != nil {
+			t.Fatalf("WriteTx() error: %v", err)
+		}
+
+		got, _ := s.Read(ctx, model.TupleFilter{ObjectType: "org", ObjectID: "acme", Relation: "owner"})
+		if len(got) != 3 {
+			t.Errorf("holders after tx = %d, want 3", len(got))
+		}
+		ids := map[string]bool{}
+		for _, x := range got {
+			ids[x.UserID] = true
+		}
+		for _, want := range []string{"new1", "new2", "new3"} {
+			if !ids[want] {
+				t.Errorf("missing written tuple for %q", want)
+			}
+		}
+		for _, gone := range []string{"old1", "old2"} {
+			if ids[gone] {
+				t.Errorf("deleted tuple for %q still present", gone)
+			}
+		}
+	})
+
+	t.Run("delete of absent tuple is a no-op", func(t *testing.T) {
+		s := NewMemoryStore()
+		if err := s.WriteTx(ctx, nil, []model.Tuple{orgOwner("ghost")}); err != nil {
+			t.Fatalf("WriteTx(absent delete) error: %v", err)
+		}
+	})
 }
