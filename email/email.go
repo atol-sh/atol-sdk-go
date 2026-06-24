@@ -13,6 +13,8 @@
 package email
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 
@@ -71,6 +73,42 @@ func CanonicalEmail(raw string) (string, error) {
 	}
 
 	return canonLocal + "@" + canonDomain, nil
+}
+
+// subjectPrefix is the namespace marker for an email-derived subject id. It
+// distinguishes a hashed-email principal from other id kinds (e.g. a future
+// "tel_" for phone) and is part of the cross-consumer wire contract: atol, the
+// SDK, and every consumer derive the SAME id, differing only in the Zanzibar
+// subject TYPE they place it under ("email:" in atol, "user:" in a consumer
+// that treats email as the principal).
+const subjectPrefix = "em_"
+
+// subjectHashBytes is the sha256 truncation length for an email subject id: 16
+// bytes (128 bits) is collision-resistant for principal keying and keeps the id
+// short (a 32-char hex tail). Changing it changes every derived id, so it is a
+// wire-contract constant.
+const subjectHashBytes = 16
+
+// Subject returns the deterministic, privacy-preserving subject id for an email
+// address: subjectPrefix + the first 16 bytes of sha256(CanonicalEmail(raw)),
+// lowercase hex-encoded (e.g. "em_3f9a...e1"). Use it to key or pre-provision a
+// principal on an email without storing the raw address: the canonical email is
+// PII, the hash is not reversible.
+//
+// Because it hashes the CANONICAL form, the id is identical across case,
+// Unicode (NFC), and IDN/punycode variants of the same address and matches
+// atol's verified-identity form byte-for-byte -- so a pre-login grant and a
+// later verified login resolve to the same subject. Compute it on both the
+// write side (invite/grant) and the read side (login).
+//
+// The email is PII; the returned error (from CanonicalEmail) never embeds it.
+func Subject(raw string) (string, error) {
+	canon, err := CanonicalEmail(raw)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(canon))
+	return subjectPrefix + hex.EncodeToString(sum[:subjectHashBytes]), nil
 }
 
 // trimASCIISpace trims leading and trailing ASCII whitespace (space, tab, CR,

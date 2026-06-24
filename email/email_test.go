@@ -1,6 +1,8 @@
 package email
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -83,4 +85,65 @@ func TestCanonicalEmailNFC(t *testing.T) {
 	if again != got {
 		t.Errorf("not idempotent: CanonicalEmail(%q) = %q", got, again)
 	}
+}
+
+func TestSubject(t *testing.T) {
+	t.Run("exact contract value: em_ + hex(sha256(canonical)[:16])", func(t *testing.T) {
+		// Derive the expected id independently from the canonical form so a
+		// change to the prefix, hash, or truncation is caught.
+		canon := "client@example.com"
+		sum := sha256.Sum256([]byte(canon))
+		want := "em_" + hex.EncodeToString(sum[:16])
+
+		got, err := Subject("Client@Example.COM")
+		if err != nil {
+			t.Fatalf("Subject: %v", err)
+		}
+		if got != want {
+			t.Fatalf("Subject = %q, want %q", got, want)
+		}
+		// "em_" + 32 hex chars.
+		if len(got) != 3+32 {
+			t.Errorf("Subject length = %d, want %d", len(got), 3+32)
+		}
+	})
+
+	t.Run("canonicalization-insensitive: variants of one address share a subject", func(t *testing.T) {
+		base, err := Subject("user@Müller.de")
+		if err != nil {
+			t.Fatalf("Subject: %v", err)
+		}
+		for _, variant := range []string{
+			"user@Müller.de",
+			"USER@MÜLLER.DE",
+			"  user@müller.de  ",
+			"user@xn--mller-kva.de",
+		} {
+			got, err := Subject(variant)
+			if err != nil {
+				t.Fatalf("Subject(%q): %v", variant, err)
+			}
+			if got != base {
+				t.Errorf("Subject(%q) = %q, want %q (must match canonical)", variant, got, base)
+			}
+		}
+	})
+
+	t.Run("distinct addresses get distinct subjects", func(t *testing.T) {
+		a, _ := Subject("a@example.com")
+		b, _ := Subject("b@example.com")
+		if a == b {
+			t.Errorf("distinct addresses collided: %q", a)
+		}
+	})
+
+	t.Run("invalid email errors and returns empty", func(t *testing.T) {
+		got, err := Subject("not-an-email")
+		if !errors.Is(err, ErrInvalidEmail) {
+			t.Errorf("Subject(invalid) err = %v, want ErrInvalidEmail", err)
+		}
+		if got != "" {
+			t.Errorf("Subject(invalid) = %q, want empty", got)
+		}
+	})
 }
