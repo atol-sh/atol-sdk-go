@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"atol.sh/sdk-go"
@@ -89,6 +90,10 @@ func TestHTTPMiddleware_RequireDPoP(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)
+	}
+	// The RequireDPoP branch must emit an RFC 9449 challenge, not a bare 401.
+	if wa := w.Header().Get("WWW-Authenticate"); !strings.HasPrefix(wa, "DPoP ") {
+		t.Errorf("WWW-Authenticate = %q, want DPoP challenge", wa)
 	}
 }
 

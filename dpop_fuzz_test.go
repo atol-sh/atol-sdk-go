@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"context"
 	"testing"
 )
 
@@ -32,6 +33,6 @@ func FuzzDPoPValidate(f *testing.F) {
 	v := NewDPoPValidator()
 	f.Fuzz(func(t *testing.T, raw, method, uri, expectedJKT string) {
 		// The ONLY requirement: never panic. Any error return is fine.
-		_, _ = v.validateString(raw, method, uri, expectedJKT)
+		_, _ = v.validateString(context.Background(), raw, method, uri, expectedJKT, "")
 	})
 }

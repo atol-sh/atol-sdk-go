@@ -29,7 +29,9 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 				return
 			}
 			if engine.RequireDPoP() && !strings.EqualFold(scheme, "DPoP") {
-				http.Error(w, "DPoP required", http.StatusUnauthorized)
+				// The resource server demands DPoP but the client presented a
+				// bare Bearer -- emit an RFC 9449 section 7.1 challenge.
+				sdk.WriteDPoPChallenge(w, nil)
 				return
 			}
 
@@ -76,9 +78,13 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 			if boundJKT != "" || strings.EqualFold(scheme, "DPoP") {
 				// Either the token was issued with a binding (cnf.jkt set)
 				// OR the client explicitly opted into DPoP scheme on the
-				// wire. Both cases require a valid DPoP proof.
-				if _, derr := engine.DPoPValidator().Validate(r, boundJKT); derr != nil {
-					http.Error(w, "invalid DPoP proof", http.StatusUnauthorized)
+				// wire. Both cases require a valid DPoP proof. Pass the
+				// extracted access token so the proof's `ath` claim is
+				// verified against it (RFC 9449 section 7.1).
+				if _, derr := engine.DPoPValidator().Validate(r, boundJKT, token); derr != nil {
+					// RFC 9449 section 7.1 challenge; never echo derr on the
+					// wire (it embeds request/timing internals).
+					sdk.WriteDPoPChallenge(w, nil, sdk.WithInvalidProofError())
 					return
 				}
 				dpopOK = true

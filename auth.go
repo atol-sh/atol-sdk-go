@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,21 +18,46 @@ import (
 // the moment the token hits the resource server.
 const tokenValidationLeeway = 30 * time.Second
 
+// ErrTokenTypeMismatch is returned by ValidateToken when WithRequiredTokenType
+// is configured and the access token's header `typ` does not match. It closes
+// the ID-token-as-access-token vector: an access token stamped `at+jwt` cannot
+// be substituted by an ID token (typ "JWT" or absent).
+var ErrTokenTypeMismatch = errors.New("token typ header does not match required value")
+
 // TokenValidator validates Atol-issued JWTs and extracts claims.
 type TokenValidator struct {
-	jwks     *atolidentity.JWKSFetcher
-	issuer   string
-	audience string // optional: when set, JWT aud must contain this value
+	jwks         *atolidentity.JWKSFetcher
+	issuer       string
+	audience     string // optional: when set, JWT aud must contain this value
+	requiredType string // optional: when set, JWT header typ must equal this value
+}
+
+// ValidatorOption configures a TokenValidator.
+type ValidatorOption func(*TokenValidator)
+
+// WithRequiredTokenType requires the access token's JWT header `typ` to equal
+// typ (e.g. "at+jwt", RFC 9068). Default (option unset) skips the check for
+// backward compatibility. Enabling it is the load-bearing control that keeps
+// an ID token from being replayed as an access token.
+func WithRequiredTokenType(typ string) ValidatorOption {
+	return func(v *TokenValidator) {
+		v.requiredType = typ
+	}
 }
 
 // NewTokenValidator creates a validator that checks JWTs against JWKS.
-// audience is optional — pass "" to skip audience validation.
-func NewTokenValidator(jwksURL, issuer, audience string) *TokenValidator {
-	return &TokenValidator{
+// audience is optional — pass "" to skip audience validation. Additional
+// behavior (e.g. required header typ) is configured via ValidatorOption.
+func NewTokenValidator(jwksURL, issuer, audience string, opts ...ValidatorOption) *TokenValidator {
+	v := &TokenValidator{
 		jwks:     atolidentity.NewJWKSFetcher(jwksURL),
 		issuer:   issuer,
 		audience: audience,
 	}
+	for _, o := range opts {
+		o(v)
+	}
+	return v
 }
 
 // ValidateToken parses and validates a JWT, returning the principal, identity, claims, and session ID (jti).
@@ -45,7 +71,16 @@ func (v *TokenValidator) ValidateToken(ctx context.Context, rawToken string) (*P
 	if len(tok.Headers) == 0 {
 		return nil, nil, nil, "", fmt.Errorf("token has no headers")
 	}
-	kid := tok.Headers[0].KeyID
+	hdr := tok.Headers[0]
+	kid := hdr.KeyID
+
+	// Enforce the access-token header typ when configured (RFC 9068 at+jwt).
+	if v.requiredType != "" {
+		typ, _ := hdr.ExtraHeaders[jose.HeaderType].(string)
+		if typ != v.requiredType {
+			return nil, nil, nil, "", fmt.Errorf("%w: got %q, want %q", ErrTokenTypeMismatch, typ, v.requiredType)
+		}
+	}
 
 	// Look up the signing key.
 	keys, err := v.jwks.FindKey(ctx, kid)

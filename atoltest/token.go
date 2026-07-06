@@ -92,9 +92,13 @@ func (f *TokenFactory) MintToken(opts ...TokenOption) string {
 		o(&cfg)
 	}
 
+	signerOpts := (&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), f.kid)
+	if cfg.typ != "" {
+		signerOpts = signerOpts.WithType(jose.ContentType(cfg.typ))
+	}
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: f.privateKey},
-		(&jose.SignerOptions{}).WithHeader(jose.HeaderKey("kid"), f.kid),
+		signerOpts,
 	)
 	if err != nil {
 		panic("atoltest: create signer: " + err.Error())
@@ -136,6 +140,9 @@ func (f *TokenFactory) MintToken(opts ...TokenOption) string {
 	if cfg.authTime != nil {
 		custom.AuthTime = cfg.authTime.Unix()
 	}
+	if cfg.jkt != "" {
+		custom.Cnf = &cnfClaim{JKT: cfg.jkt}
+	}
 
 	tok, err := gojosejwt.Signed(signer).Claims(standard).Claims(custom).Serialize()
 	if err != nil {
@@ -176,22 +183,31 @@ type tokenConfig struct {
 	expiry         time.Duration
 	jti            string
 	authTime       *time.Time
+	jkt            string // cnf.jkt thumbprint for DPoP-bound (sender-constrained) tokens
+	typ            string // JWT header typ (e.g. "at+jwt")
 }
 
 // atolClaims mirrors identity.AtolClaims for JWT generation.
 // We duplicate the struct to avoid an import cycle.
 type atolClaims struct {
-	OrgID          string   `json:"atol:org_id,omitempty"`
-	Plan           string   `json:"atol:plan,omitempty"`
-	Roles          []string `json:"atol:roles,omitempty"`
-	AuthMethod     string   `json:"atol:auth_method,omitempty"`
-	MFAVerified    bool     `json:"atol:mfa_verified,omitempty"`
-	TrustDomain    string   `json:"atol:trust_domain,omitempty"`
-	AuthTime       int64    `json:"atol:auth_time,omitempty"`
-	IdentityID     string   `json:"atol:identity_id,omitempty"`
-	IdentityScheme string   `json:"atol:identity_scheme,omitempty"`
-	Email          string   `json:"email,omitempty"`
-	EmailVerified  bool     `json:"email_verified,omitempty"`
+	OrgID          string    `json:"atol:org_id,omitempty"`
+	Plan           string    `json:"atol:plan,omitempty"`
+	Roles          []string  `json:"atol:roles,omitempty"`
+	AuthMethod     string    `json:"atol:auth_method,omitempty"`
+	MFAVerified    bool      `json:"atol:mfa_verified,omitempty"`
+	TrustDomain    string    `json:"atol:trust_domain,omitempty"`
+	AuthTime       int64     `json:"atol:auth_time,omitempty"`
+	IdentityID     string    `json:"atol:identity_id,omitempty"`
+	IdentityScheme string    `json:"atol:identity_scheme,omitempty"`
+	Email          string    `json:"email,omitempty"`
+	EmailVerified  bool      `json:"email_verified,omitempty"`
+	Cnf            *cnfClaim `json:"cnf,omitempty"`
+}
+
+// cnfClaim mirrors identity.ConfirmationClaim (RFC 7800) for JWT generation.
+// Duplicated to avoid an import cycle, matching atolClaims.
+type cnfClaim struct {
+	JKT string `json:"jkt,omitempty"`
 }
 
 // WithSubject sets the JWT subject (maps to Principal.UserID).
@@ -265,4 +281,30 @@ func WithJTI(jti string) TokenOption {
 // WithAuthTime sets the atol:auth_time claim.
 func WithAuthTime(t time.Time) TokenOption {
 	return func(c *tokenConfig) { c.authTime = &t }
+}
+
+// WithConfirmation stamps the RFC 7800 `cnf.jkt` claim, marking the token as
+// DPoP-bound (sender-constrained) to the key whose RFC 7638 SHA-256 thumbprint
+// is jkt. Pair it with a DPoPProver (jkt = prover.JKT()) so the minted token
+// and the proofs the prover signs share a binding the DPoPValidator accepts.
+func WithConfirmation(jkt string) TokenOption {
+	return func(c *tokenConfig) { c.jkt = jkt }
+}
+
+// WithDPoPBinding is an alias for WithConfirmation, named for the DPoP use
+// case.
+func WithDPoPBinding(jkt string) TokenOption {
+	return WithConfirmation(jkt)
+}
+
+// WithTokenType stamps the JWT header `typ` (e.g. "at+jwt", RFC 9068). Use it
+// so DPoP-bound test tokens carry the access-token type a validator configured
+// with WithRequiredTokenType enforces.
+func WithTokenType(typ string) TokenOption {
+	return func(c *tokenConfig) { c.typ = typ }
+}
+
+// WithType is an alias for WithTokenType.
+func WithType(typ string) TokenOption {
+	return WithTokenType(typ)
 }

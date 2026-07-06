@@ -83,6 +83,7 @@ type newOptions struct {
 	maxStaleness      *time.Duration
 	stalenessMode     *StalenessMode
 	bootstrapInterval *time.Duration
+	replayGuard       ReplayGuard
 }
 
 // WithLocalOnly creates an SDK instance that writes tuples directly to the
@@ -92,6 +93,16 @@ type newOptions struct {
 func WithLocalOnly() NewOption {
 	return func(o *newOptions) {
 		o.localOnly = true
+	}
+}
+
+// WithDPoPReplayGuard installs a custom DPoP replay guard on the engine's
+// DPoP validator. Use this when the resource server runs more than one
+// instance: the default in-memory guard only detects replays within a single
+// process. See WithReplayGuard for details.
+func WithDPoPReplayGuard(g ReplayGuard) NewOption {
+	return func(o *newOptions) {
+		o.replayGuard = g
 	}
 }
 
@@ -217,12 +228,28 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	}
 
 	var metrics *syncMetrics
+	var dpopMetricsColl *dpopMetrics
 	if no.metricsReg != nil {
 		m, err := newSyncMetrics(no.metricsReg)
 		if err != nil {
 			return nil, fmt.Errorf("register sync metrics: %w", err)
 		}
 		metrics = m
+		dm, err := newDPoPMetrics(no.metricsReg)
+		if err != nil {
+			return nil, fmt.Errorf("register dpop metrics: %w", err)
+		}
+		dpopMetricsColl = dm
+	}
+
+	// Build the DPoP validator with any caller-supplied replay guard and
+	// outcome metrics.
+	var dpopOpts []DPoPValidatorOption
+	if no.replayGuard != nil {
+		dpopOpts = append(dpopOpts, WithReplayGuard(no.replayGuard))
+	}
+	if dpopMetricsColl != nil {
+		dpopOpts = append(dpopOpts, withDPoPMetrics(dpopMetricsColl))
 	}
 
 	a := &Atol{
@@ -233,7 +260,7 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 		policy:           policyEngine,
 		validator:        validator,
 		sessionValidator: sessionValidator,
-		dpopValidator:    NewDPoPValidator(),
+		dpopValidator:    NewDPoPValidator(dpopOpts...),
 		decisionLogger:   decisionLogger,
 		materializers:    newMaterializerRegistry(zanzibarStore),
 		tupleWriter:      tw,
