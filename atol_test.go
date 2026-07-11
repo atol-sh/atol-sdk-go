@@ -3,12 +3,14 @@ package sdk_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	sdk "atol.sh/sdk-go"
 	"atol.sh/sdk-go/atoltest"
 	"atol.sh/sdk-go/device"
+	"atol.sh/sdk-go/gen/go/atol/api/v1/apiv1connect"
 	atolidentity "atol.sh/sdk-go/identity"
 	"atol.sh/sdk-go/zanzibar/model"
 )
@@ -605,7 +607,11 @@ func TestMaterializeAll(t *testing.T) {
 
 // TestSessionValidator_IsRevoked tests session revocation checks directly.
 func TestSessionValidator_IsRevoked(t *testing.T) {
-	sv := sdk.NewSessionValidator("http://localhost:0", "test-org", 1*time.Hour, nil, nil)
+	dpClient := apiv1connect.NewDPAgentServiceClient(http.DefaultClient, "http://localhost:0")
+	sv, err := sdk.NewSessionValidator(dpClient, "test-org", 1*time.Hour, nil)
+	if err != nil {
+		t.Fatalf("NewSessionValidator: %v", err)
+	}
 	// Don't start — we don't need polling, just the IsRevoked check.
 
 	// Empty revocation list — nothing is revoked.

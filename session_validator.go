@@ -2,33 +2,33 @@ package sdk
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 
+	connect "connectrpc.com/connect"
 	"go.uber.org/zap"
+
+	apiv1 "atol.sh/sdk-go/gen/go/atol/api/v1"
+	"atol.sh/sdk-go/gen/go/atol/api/v1/apiv1connect"
 )
 
 // crlErrorThreshold is the number of consecutive refresh failures after
 // which the session validator escalates from Warn to Error logging.
 const crlErrorThreshold = 3
 
-// SessionValidator checks JWTs against a revocation list (CRL) fetched
-// from the control plane. It polls GET /api/v1/sessions/revoked periodically
-// and caches the deny list in-memory for O(1) lookups.
+// SessionValidator checks JWTs against a revocation list (CRL) fetched from
+// the control plane. It polls the DPAgentService ListRevokedSessions RPC
+// periodically and caches the deny list in-memory for O(1) lookups.
 //
 // The validator never fails open silently: every refresh failure is logged,
 // consecutive failures escalate to Error level, and callers can observe
 // health via Healthy() and LastRefreshError().
 type SessionValidator struct {
-	controlPlaneURL string
-	orgID           string // tenant/org ID for scoping
-	pollInterval    time.Duration
-	client          *http.Client
-	logger          *zap.Logger
+	client       apiv1connect.DPAgentServiceClient
+	orgID        string // tenant/org ID for scoping
+	pollInterval time.Duration
+	logger       *zap.Logger
 
 	mu                  sync.RWMutex
 	revoked             map[string]struct{} // set of revoked session IDs (JWT jti values)
@@ -37,32 +37,33 @@ type SessionValidator struct {
 	stopCh              chan struct{}
 }
 
-// NewSessionValidator creates a session validator that polls the control plane
-// for revoked sessions scoped to a tenant. Default poll interval is 30 seconds.
+// NewSessionValidator creates a session validator that polls the control
+// plane for revoked sessions scoped to a tenant. Default poll interval is 30
+// seconds.
 //
-// client must be the SDK's authenticated (HMAC-signing) HTTP client -- the
-// control plane requires API-key authentication on the CRL endpoint. A nil
-// client falls back to a plain client with a 5s timeout (useful only against
-// unauthenticated test servers). A nil logger falls back to zap.NewNop().
-func NewSessionValidator(controlPlaneURL, orgID string, pollInterval time.Duration, client *http.Client, logger *zap.Logger) *SessionValidator {
+// client must be a DPAgentService client backed by the SDK's authenticated
+// (HMAC-signing) HTTP client -- the control plane requires API-key
+// authentication on the CRL RPC. A nil client is a configuration error, not
+// a degraded mode: it is rejected here so a mis-wired validator cannot poll
+// unauthenticated forever. A nil logger falls back to zap.NewNop().
+func NewSessionValidator(client apiv1connect.DPAgentServiceClient, orgID string, pollInterval time.Duration, logger *zap.Logger) (*SessionValidator, error) {
+	if client == nil {
+		return nil, fmt.Errorf("session validator requires a DPAgentService client")
+	}
 	if pollInterval <= 0 {
 		pollInterval = 30 * time.Second
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
 	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &SessionValidator{
-		controlPlaneURL: controlPlaneURL,
-		orgID:           orgID,
-		pollInterval:    pollInterval,
-		client:          client,
-		logger:          logger,
-		revoked:         make(map[string]struct{}),
-		stopCh:          make(chan struct{}),
-	}
+		client:       client,
+		orgID:        orgID,
+		pollInterval: pollInterval,
+		logger:       logger,
+		revoked:      make(map[string]struct{}),
+		stopCh:       make(chan struct{}),
+	}, nil
 }
 
 // Start begins background polling. Call Stop() to clean up.
@@ -161,37 +162,15 @@ func (v *SessionValidator) refresh() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/api/v1/sessions/revoked", v.controlPlaneURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := v.client.ListRevokedSessions(ctx,
+		connect.NewRequest(&apiv1.ListRevokedSessionsRequest{OrgId: v.orgID}))
 	if err != nil {
-		return fmt.Errorf("build CRL request %s: %w", url, err)
-	}
-	if v.orgID != "" {
-		req.Header.Set("X-Atol-Org-Id", v.orgID)
+		return fmt.Errorf("fetch session CRL for org %s: %w", v.orgID, err)
 	}
 
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch CRL from %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Drain a bounded amount so the connection can be reused; the body
-		// content is intentionally not surfaced (may contain server detail).
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("CRL endpoint %s returned status %d", url, resp.StatusCode)
-	}
-
-	var body struct {
-		RevokedSessionIDs []string `json:"revoked_session_ids"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return fmt.Errorf("decode CRL response from %s: %w", url, err)
-	}
-
-	newSet := make(map[string]struct{}, len(body.RevokedSessionIDs))
-	for _, id := range body.RevokedSessionIDs {
+	ids := resp.Msg.GetRevokedSessionIds()
+	newSet := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
 		newSet[id] = struct{}{}
 	}
 

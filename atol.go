@@ -208,12 +208,22 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 		tw = &remoteTupleWriter{client: accessClient, storeID: config.StoreID, zEngine: zanzibarEngine}
 	}
 
-	// Session validator (CRL) — polls revoked sessions from the control plane
-	// using the HMAC-authenticated client so polls succeed against the
-	// API-key-required control plane.
+	// DPAgentService client over the HMAC-authenticated http client -- shared
+	// by the session validator and the drift detector.
+	var dpClient apiv1connect.DPAgentServiceClient
+	if config.ControlPlaneURL != "" {
+		dpClient = apiv1connect.NewDPAgentServiceClient(httpClient, config.ControlPlaneURL)
+	}
+
+	// Session validator (CRL) -- polls revoked sessions over the DPAgentService
+	// RPC, which accepts the SDK's API-key authentication.
 	var sessionValidator *SessionValidator
-	if config.ControlPlaneURL != "" && validator != nil {
-		sessionValidator = NewSessionValidator(config.ControlPlaneURL, config.StoreID, 30*time.Second, httpClient, logger.Named("session_crl"))
+	if dpClient != nil && validator != nil {
+		sv, svErr := NewSessionValidator(dpClient, config.StoreID, 30*time.Second, logger.Named("session_crl"))
+		if svErr != nil {
+			return nil, fmt.Errorf("session validator: %w", svErr)
+		}
+		sessionValidator = sv
 		sessionValidator.Start()
 	}
 
@@ -222,8 +232,7 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	// (e.g. a replayed bearer token from curl), and reports it to the control
 	// plane. Only active when device intelligence is enabled.
 	var driftDetector *device.DriftDetector
-	if config.Device.Enabled && config.ControlPlaneURL != "" {
-		dpClient := apiv1connect.NewDPAgentServiceClient(httpClient, config.ControlPlaneURL)
+	if config.Device.Enabled && dpClient != nil {
 		driftDetector = device.NewDriftDetector(dpClient, device.DriftConfig{})
 	}
 

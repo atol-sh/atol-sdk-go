@@ -23,12 +23,113 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ListRevokedSessionsRequest fetches the session revocation list for an organization.
+type ListRevokedSessionsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Organization to list revoked sessions for.
+	OrgId         string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRevokedSessionsRequest) Reset() {
+	*x = ListRevokedSessionsRequest{}
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRevokedSessionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRevokedSessionsRequest) ProtoMessage() {}
+
+func (x *ListRevokedSessionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRevokedSessionsRequest.ProtoReflect.Descriptor instead.
+func (*ListRevokedSessionsRequest) Descriptor() ([]byte, []int) {
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ListRevokedSessionsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+// ListRevokedSessionsResponse is the session revocation list.
+type ListRevokedSessionsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Revoked session identifiers (JWT jti values).
+	RevokedSessionIds []string `protobuf:"bytes,1,rep,name=revoked_session_ids,json=revokedSessionIds,proto3" json:"revoked_session_ids,omitempty"`
+	// Server time the list was generated at.
+	AsOf          *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=as_of,json=asOf,proto3" json:"as_of,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRevokedSessionsResponse) Reset() {
+	*x = ListRevokedSessionsResponse{}
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRevokedSessionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRevokedSessionsResponse) ProtoMessage() {}
+
+func (x *ListRevokedSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRevokedSessionsResponse.ProtoReflect.Descriptor instead.
+func (*ListRevokedSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListRevokedSessionsResponse) GetRevokedSessionIds() []string {
+	if x != nil {
+		return x.RevokedSessionIds
+	}
+	return nil
+}
+
+func (x *ListRevokedSessionsResponse) GetAsOf() *timestamppb.Timestamp {
+	if x != nil {
+		return x.AsOf
+	}
+	return nil
+}
+
 // GetSessionDeviceSnapshotRequest looks up the device bound to a session.
 type GetSessionDeviceSnapshotRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization the session belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Session identifier (the token's `jti` claim).
+	// Session identifier (the token's jti claim).
 	SessionId     string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -36,7 +137,7 @@ type GetSessionDeviceSnapshotRequest struct {
 
 func (x *GetSessionDeviceSnapshotRequest) Reset() {
 	*x = GetSessionDeviceSnapshotRequest{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[0]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +149,7 @@ func (x *GetSessionDeviceSnapshotRequest) String() string {
 func (*GetSessionDeviceSnapshotRequest) ProtoMessage() {}
 
 func (x *GetSessionDeviceSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[0]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +162,7 @@ func (x *GetSessionDeviceSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionDeviceSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionDeviceSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{0}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetSessionDeviceSnapshotRequest) GetOrgId() string {
@@ -82,19 +183,17 @@ func (x *GetSessionDeviceSnapshotRequest) GetSessionId() string {
 // per session and compares live request signals against.
 type GetSessionDeviceSnapshotResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether a device is bound to the session. When false, the remaining fields
-	// are unset and the SDK has nothing to compare against.
+	// Whether a device is bound to the session.
 	Found bool `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
 	// Bound device identifier.
 	DeviceId string `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	// Bound device's server TLS fingerprint. May be empty for client-only
-	// devices that were never observed at the TLS layer.
+	// Bound device's server TLS fingerprint (may be empty for client-only devices).
 	Ja4 string `protobuf:"bytes,3,opt,name=ja4,proto3" json:"ja4,omitempty"`
-	// Bound device's user-agent family, e.g. `chrome`.
+	// Bound device's user-agent family.
 	UserAgent string `protobuf:"bytes,4,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
-	// Bound device platform, e.g. `macos`, `windows`.
+	// Bound device platform (e.g. "macos", "windows").
 	Platform string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
-	// Bound device browser family, e.g. `chrome`.
+	// Bound device browser family (e.g. "chrome").
 	BrowserFamily string `protobuf:"bytes,6,opt,name=browser_family,json=browserFamily,proto3" json:"browser_family,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -102,7 +201,7 @@ type GetSessionDeviceSnapshotResponse struct {
 
 func (x *GetSessionDeviceSnapshotResponse) Reset() {
 	*x = GetSessionDeviceSnapshotResponse{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[1]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -114,7 +213,7 @@ func (x *GetSessionDeviceSnapshotResponse) String() string {
 func (*GetSessionDeviceSnapshotResponse) ProtoMessage() {}
 
 func (x *GetSessionDeviceSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[1]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -127,7 +226,7 @@ func (x *GetSessionDeviceSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionDeviceSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionDeviceSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{1}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetSessionDeviceSnapshotResponse) GetFound() bool {
@@ -174,8 +273,7 @@ func (x *GetSessionDeviceSnapshotResponse) GetBrowserFamily() string {
 
 // ReportDeviceDivergenceRequest wraps a single divergence event for streaming.
 type ReportDeviceDivergenceRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The divergence event to report.
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	Event         *DeviceDivergenceEvent `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -183,7 +281,7 @@ type ReportDeviceDivergenceRequest struct {
 
 func (x *ReportDeviceDivergenceRequest) Reset() {
 	*x = ReportDeviceDivergenceRequest{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[2]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +293,7 @@ func (x *ReportDeviceDivergenceRequest) String() string {
 func (*ReportDeviceDivergenceRequest) ProtoMessage() {}
 
 func (x *ReportDeviceDivergenceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[2]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +306,7 @@ func (x *ReportDeviceDivergenceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportDeviceDivergenceRequest.ProtoReflect.Descriptor instead.
 func (*ReportDeviceDivergenceRequest) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{2}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ReportDeviceDivergenceRequest) GetEvent() *DeviceDivergenceEvent {
@@ -224,7 +322,7 @@ type DeviceDivergenceEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization the session belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Session identifier (the token's `jti` claim).
+	// Session identifier (the token's jti claim).
 	SessionId string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// User the session belongs to.
 	UserId string `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -236,7 +334,7 @@ type DeviceDivergenceEvent struct {
 	ObservedUserAgent string `protobuf:"bytes,6,opt,name=observed_user_agent,json=observedUserAgent,proto3" json:"observed_user_agent,omitempty"`
 	// Live client IP observed on this request.
 	ObservedIp string `protobuf:"bytes,7,opt,name=observed_ip,json=observedIp,proto3" json:"observed_ip,omitempty"`
-	// What diverged: `ja4`, `user_agent`, `ip`, or `no_fingerprint`.
+	// What diverged: "ja4", "user_agent", "ip", or "no_fingerprint".
 	DivergenceKind string `protobuf:"bytes,8,opt,name=divergence_kind,json=divergenceKind,proto3" json:"divergence_kind,omitempty"`
 	// When the divergence was observed.
 	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
@@ -246,7 +344,7 @@ type DeviceDivergenceEvent struct {
 
 func (x *DeviceDivergenceEvent) Reset() {
 	*x = DeviceDivergenceEvent{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[3]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -258,7 +356,7 @@ func (x *DeviceDivergenceEvent) String() string {
 func (*DeviceDivergenceEvent) ProtoMessage() {}
 
 func (x *DeviceDivergenceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[3]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -271,7 +369,7 @@ func (x *DeviceDivergenceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceDivergenceEvent.ProtoReflect.Descriptor instead.
 func (*DeviceDivergenceEvent) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{3}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeviceDivergenceEvent) GetOrgId() string {
@@ -342,7 +440,7 @@ type ReportDeviceDivergenceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Number of divergence events accepted.
 	Accepted int32 `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	// Number rejected, e.g. for validation failures.
+	// Number rejected (e.g. validation failures).
 	Rejected      int32 `protobuf:"varint,2,opt,name=rejected,proto3" json:"rejected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -350,7 +448,7 @@ type ReportDeviceDivergenceResponse struct {
 
 func (x *ReportDeviceDivergenceResponse) Reset() {
 	*x = ReportDeviceDivergenceResponse{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[4]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +460,7 @@ func (x *ReportDeviceDivergenceResponse) String() string {
 func (*ReportDeviceDivergenceResponse) ProtoMessage() {}
 
 func (x *ReportDeviceDivergenceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[4]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +473,7 @@ func (x *ReportDeviceDivergenceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportDeviceDivergenceResponse.ProtoReflect.Descriptor instead.
 func (*ReportDeviceDivergenceResponse) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{4}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReportDeviceDivergenceResponse) GetAccepted() int32 {
@@ -403,7 +501,7 @@ type GetBootstrapSnapshotRequest struct {
 
 func (x *GetBootstrapSnapshotRequest) Reset() {
 	*x = GetBootstrapSnapshotRequest{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[5]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +513,7 @@ func (x *GetBootstrapSnapshotRequest) String() string {
 func (*GetBootstrapSnapshotRequest) ProtoMessage() {}
 
 func (x *GetBootstrapSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[5]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +526,7 @@ func (x *GetBootstrapSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBootstrapSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*GetBootstrapSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{5}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetBootstrapSnapshotRequest) GetOrgId() string {
@@ -438,21 +536,20 @@ func (x *GetBootstrapSnapshotRequest) GetOrgId() string {
 	return ""
 }
 
-// GetBootstrapSnapshotResponse contains the full authorization and policy state
-// an agent needs to begin serving decisions locally.
+// GetBootstrapSnapshotResponse contains the full authorization and policy state.
 type GetBootstrapSnapshotResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Authorization model in Atol's FGA DSL format.
+	// Authorization model as structured YAML config source.
 	AuthorizationModel string `protobuf:"bytes,1,opt,name=authorization_model,json=authorizationModel,proto3" json:"authorization_model,omitempty"`
 	// All authorization tuples for the organization.
 	Tuples []*Tuple `protobuf:"bytes,2,rep,name=tuples,proto3" json:"tuples,omitempty"`
-	// Active OPA policy bundle as a gzip-compressed tar archive.
+	// Active OPA policy bundle (tar.gz).
 	PolicyBundle []byte `protobuf:"bytes,3,opt,name=policy_bundle,json=policyBundle,proto3" json:"policy_bundle,omitempty"`
-	// OPA data tree content (the `data` document the bundle evaluates against).
+	// OPA data tree content.
 	PolicyData *structpb.Struct `protobuf:"bytes,4,opt,name=policy_data,json=policyData,proto3" json:"policy_data,omitempty"`
-	// Token for requesting incremental updates via StreamMutations.
+	// Token for requesting incremental updates after bootstrap.
 	ContinuationToken string `protobuf:"bytes,5,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
-	// Version of the active policy bundle (monotonically increasing).
+	// Version of the active policy bundle (auto-incrementing).
 	PolicyBundleVersion int32 `protobuf:"varint,6,opt,name=policy_bundle_version,json=policyBundleVersion,proto3" json:"policy_bundle_version,omitempty"`
 	// Highest version among all policy data paths.
 	PolicyDataVersion int32 `protobuf:"varint,7,opt,name=policy_data_version,json=policyDataVersion,proto3" json:"policy_data_version,omitempty"`
@@ -462,7 +559,7 @@ type GetBootstrapSnapshotResponse struct {
 
 func (x *GetBootstrapSnapshotResponse) Reset() {
 	*x = GetBootstrapSnapshotResponse{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[6]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +571,7 @@ func (x *GetBootstrapSnapshotResponse) String() string {
 func (*GetBootstrapSnapshotResponse) ProtoMessage() {}
 
 func (x *GetBootstrapSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[6]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +584,7 @@ func (x *GetBootstrapSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBootstrapSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*GetBootstrapSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{6}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetBootstrapSnapshotResponse) GetAuthorizationModel() string {
@@ -539,15 +636,14 @@ func (x *GetBootstrapSnapshotResponse) GetPolicyDataVersion() int32 {
 	return 0
 }
 
-// Tuple is an authorization relationship triple: `user` has `relation` on
-// `object`.
+// Tuple is an authorization relationship triple.
 type Tuple struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Subject in `type:id` form, e.g. `user:alice`.
+	// User identifier in "type:id" format.
 	User string `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	// Relation name, e.g. `editor`.
+	// Relation name.
 	Relation string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
-	// Object in `type:id` form, e.g. `document:readme`.
+	// Object identifier in "type:id" format.
 	Object        string `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -555,7 +651,7 @@ type Tuple struct {
 
 func (x *Tuple) Reset() {
 	*x = Tuple{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[7]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -567,7 +663,7 @@ func (x *Tuple) String() string {
 func (*Tuple) ProtoMessage() {}
 
 func (x *Tuple) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[7]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -580,7 +676,7 @@ func (x *Tuple) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Tuple.ProtoReflect.Descriptor instead.
 func (*Tuple) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{7}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Tuple) GetUser() string {
@@ -607,7 +703,7 @@ func (x *Tuple) GetObject() string {
 // IngestDecisionLogsRequest wraps a single decision log entry for streaming.
 type IngestDecisionLogsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The decision log entry to persist.
+	// The decision log entry.
 	Log           *DecisionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -615,7 +711,7 @@ type IngestDecisionLogsRequest struct {
 
 func (x *IngestDecisionLogsRequest) Reset() {
 	*x = IngestDecisionLogsRequest{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[8]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -627,7 +723,7 @@ func (x *IngestDecisionLogsRequest) String() string {
 func (*IngestDecisionLogsRequest) ProtoMessage() {}
 
 func (x *IngestDecisionLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[8]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -640,7 +736,7 @@ func (x *IngestDecisionLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestDecisionLogsRequest.ProtoReflect.Descriptor instead.
 func (*IngestDecisionLogsRequest) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{8}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *IngestDecisionLogsRequest) GetLog() *DecisionLog {
@@ -655,17 +751,17 @@ type DecisionLog struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization this decision belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Unique request identifier for correlation across systems.
+	// Unique request identifier for correlation.
 	RequestId string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// When the decision was made.
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	// SPIFFE ID or identity of the actor making the request.
 	ActorIdentity string `protobuf:"bytes,4,opt,name=actor_identity,json=actorIdentity,proto3" json:"actor_identity,omitempty"`
-	// Authentication method used: `oidc`, `spiffe`, or `api_key`.
+	// Authentication method used: "oidc", "spiffe", "api_key".
 	AuthMethod string `protobuf:"bytes,5,opt,name=auth_method,json=authMethod,proto3" json:"auth_method,omitempty"`
-	// Action being authorized, e.g. `read`, `write`, `delete`.
+	// Action being authorized (e.g., "read", "write", "delete").
 	Action string `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
-	// Resource being accessed in `type:id` form, e.g. `document:readme`.
+	// Resource being accessed (e.g., "document:readme").
 	Resource string `protobuf:"bytes,7,opt,name=resource,proto3" json:"resource,omitempty"`
 	// Whether the request was allowed.
 	Allowed bool `protobuf:"varint,8,opt,name=allowed,proto3" json:"allowed,omitempty"`
@@ -673,9 +769,9 @@ type DecisionLog struct {
 	MatchedRule string `protobuf:"bytes,9,opt,name=matched_rule,json=matchedRule,proto3" json:"matched_rule,omitempty"`
 	// Evaluation latency in microseconds.
 	EvalUs int32 `protobuf:"varint,10,opt,name=eval_us,json=evalUs,proto3" json:"eval_us,omitempty"`
-	// Number of Zanzibar checks performed during evaluation.
+	// Number of Zanzibar calls made during evaluation.
 	ZanzibarCalls int32 `protobuf:"varint,11,opt,name=zanzibar_calls,json=zanzibarCalls,proto3" json:"zanzibar_calls,omitempty"`
-	// Additional decision context, e.g. matched conditions.
+	// Additional decision context (e.g., matched conditions).
 	Context       *structpb.Struct `protobuf:"bytes,12,opt,name=context,proto3" json:"context,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -683,7 +779,7 @@ type DecisionLog struct {
 
 func (x *DecisionLog) Reset() {
 	*x = DecisionLog{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[9]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +791,7 @@ func (x *DecisionLog) String() string {
 func (*DecisionLog) ProtoMessage() {}
 
 func (x *DecisionLog) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[9]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +804,7 @@ func (x *DecisionLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecisionLog.ProtoReflect.Descriptor instead.
 func (*DecisionLog) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{9}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DecisionLog) GetOrgId() string {
@@ -798,9 +894,9 @@ func (x *DecisionLog) GetContext() *structpb.Struct {
 // IngestDecisionLogsResponse summarizes the ingestion outcome.
 type IngestDecisionLogsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Number of decision logs accepted.
+	// Number of decision logs successfully accepted.
 	Accepted int32 `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	// Number rejected, e.g. for validation failures.
+	// Number of decision logs rejected (e.g., validation failures).
 	Rejected      int32 `protobuf:"varint,2,opt,name=rejected,proto3" json:"rejected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -808,7 +904,7 @@ type IngestDecisionLogsResponse struct {
 
 func (x *IngestDecisionLogsResponse) Reset() {
 	*x = IngestDecisionLogsResponse{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[10]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -820,7 +916,7 @@ func (x *IngestDecisionLogsResponse) String() string {
 func (*IngestDecisionLogsResponse) ProtoMessage() {}
 
 func (x *IngestDecisionLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[10]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -833,7 +929,7 @@ func (x *IngestDecisionLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestDecisionLogsResponse.ProtoReflect.Descriptor instead.
 func (*IngestDecisionLogsResponse) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{10}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *IngestDecisionLogsResponse) GetAccepted() int32 {
@@ -855,8 +951,7 @@ type StreamMutationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization to stream mutations for.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Continuation token from bootstrap or a previous stream. The server resumes
-	// delivery from the position this token encodes.
+	// Continuation token from bootstrap or previous stream.
 	ContinuationToken string `protobuf:"bytes,2,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -864,7 +959,7 @@ type StreamMutationsRequest struct {
 
 func (x *StreamMutationsRequest) Reset() {
 	*x = StreamMutationsRequest{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[11]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -876,7 +971,7 @@ func (x *StreamMutationsRequest) String() string {
 func (*StreamMutationsRequest) ProtoMessage() {}
 
 func (x *StreamMutationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[11]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -889,7 +984,7 @@ func (x *StreamMutationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamMutationsRequest.ProtoReflect.Descriptor instead.
 func (*StreamMutationsRequest) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{11}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StreamMutationsRequest) GetOrgId() string {
@@ -906,11 +1001,10 @@ func (x *StreamMutationsRequest) GetContinuationToken() string {
 	return ""
 }
 
-// StreamMutationsResponse delivers a single mutation plus the updated
-// continuation token to resume from.
+// StreamMutationsResponse wraps a single mutation event.
 type StreamMutationsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The mutation that occurred. Exactly one variant is set per message.
+	// The mutation that occurred.
 	//
 	// Types that are valid to be assigned to Mutation:
 	//
@@ -920,7 +1014,7 @@ type StreamMutationsResponse struct {
 	//	*StreamMutationsResponse_PolicyBundleUpdate
 	//	*StreamMutationsResponse_PolicyDataUpdate
 	Mutation isStreamMutationsResponse_Mutation `protobuf_oneof:"mutation"`
-	// Updated continuation token to present on reconnect after this mutation.
+	// Updated continuation token after this mutation.
 	ContinuationToken string `protobuf:"bytes,6,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -928,7 +1022,7 @@ type StreamMutationsResponse struct {
 
 func (x *StreamMutationsResponse) Reset() {
 	*x = StreamMutationsResponse{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[12]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -940,7 +1034,7 @@ func (x *StreamMutationsResponse) String() string {
 func (*StreamMutationsResponse) ProtoMessage() {}
 
 func (x *StreamMutationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[12]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -953,7 +1047,7 @@ func (x *StreamMutationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamMutationsResponse.ProtoReflect.Descriptor instead.
 func (*StreamMutationsResponse) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{12}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StreamMutationsResponse) GetMutation() isStreamMutationsResponse_Mutation {
@@ -1020,27 +1114,22 @@ type isStreamMutationsResponse_Mutation interface {
 }
 
 type StreamMutationsResponse_TupleWrite struct {
-	// A new authorization tuple was written.
 	TupleWrite *TupleWrite `protobuf:"bytes,1,opt,name=tuple_write,json=tupleWrite,proto3,oneof"`
 }
 
 type StreamMutationsResponse_TupleDelete struct {
-	// An authorization tuple was removed.
 	TupleDelete *TupleDelete `protobuf:"bytes,2,opt,name=tuple_delete,json=tupleDelete,proto3,oneof"`
 }
 
 type StreamMutationsResponse_ModelUpdate struct {
-	// The authorization model changed.
 	ModelUpdate *ModelUpdate `protobuf:"bytes,3,opt,name=model_update,json=modelUpdate,proto3,oneof"`
 }
 
 type StreamMutationsResponse_PolicyBundleUpdate struct {
-	// A new policy bundle was activated.
 	PolicyBundleUpdate *PolicyBundleUpdate `protobuf:"bytes,4,opt,name=policy_bundle_update,json=policyBundleUpdate,proto3,oneof"`
 }
 
 type StreamMutationsResponse_PolicyDataUpdate struct {
-	// A policy data path changed.
 	PolicyDataUpdate *PolicyDataUpdate `protobuf:"bytes,5,opt,name=policy_data_update,json=policyDataUpdate,proto3,oneof"`
 }
 
@@ -1056,16 +1145,15 @@ func (*StreamMutationsResponse_PolicyDataUpdate) isStreamMutationsResponse_Mutat
 
 // TupleWrite indicates a new authorization tuple was written.
 type TupleWrite struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tuple that was written.
-	Tuple         *Tuple `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tuple         *Tuple                 `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TupleWrite) Reset() {
 	*x = TupleWrite{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[13]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1077,7 +1165,7 @@ func (x *TupleWrite) String() string {
 func (*TupleWrite) ProtoMessage() {}
 
 func (x *TupleWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[13]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1090,7 +1178,7 @@ func (x *TupleWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TupleWrite.ProtoReflect.Descriptor instead.
 func (*TupleWrite) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{13}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TupleWrite) GetTuple() *Tuple {
@@ -1102,16 +1190,15 @@ func (x *TupleWrite) GetTuple() *Tuple {
 
 // TupleDelete indicates an authorization tuple was removed.
 type TupleDelete struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The tuple that was removed.
-	Tuple         *Tuple `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tuple         *Tuple                 `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TupleDelete) Reset() {
 	*x = TupleDelete{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[14]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1123,7 +1210,7 @@ func (x *TupleDelete) String() string {
 func (*TupleDelete) ProtoMessage() {}
 
 func (x *TupleDelete) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[14]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1136,7 +1223,7 @@ func (x *TupleDelete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TupleDelete.ProtoReflect.Descriptor instead.
 func (*TupleDelete) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{14}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TupleDelete) GetTuple() *Tuple {
@@ -1157,7 +1244,7 @@ type ModelUpdate struct {
 
 func (x *ModelUpdate) Reset() {
 	*x = ModelUpdate{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[15]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1169,7 +1256,7 @@ func (x *ModelUpdate) String() string {
 func (*ModelUpdate) ProtoMessage() {}
 
 func (x *ModelUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[15]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1182,7 +1269,7 @@ func (x *ModelUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelUpdate.ProtoReflect.Descriptor instead.
 func (*ModelUpdate) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{15}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ModelUpdate) GetAuthorizationModel() string {
@@ -1195,9 +1282,9 @@ func (x *ModelUpdate) GetAuthorizationModel() string {
 // PolicyBundleUpdate indicates a new policy bundle was activated.
 type PolicyBundleUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The new policy bundle as a gzip-compressed tar archive.
+	// The new policy bundle (tar.gz).
 	PolicyBundle []byte `protobuf:"bytes,1,opt,name=policy_bundle,json=policyBundle,proto3" json:"policy_bundle,omitempty"`
-	// New bundle version (monotonically increasing).
+	// New bundle version.
 	Version       int32 `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1205,7 +1292,7 @@ type PolicyBundleUpdate struct {
 
 func (x *PolicyBundleUpdate) Reset() {
 	*x = PolicyBundleUpdate{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[16]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1217,7 +1304,7 @@ func (x *PolicyBundleUpdate) String() string {
 func (*PolicyBundleUpdate) ProtoMessage() {}
 
 func (x *PolicyBundleUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[16]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1230,7 +1317,7 @@ func (x *PolicyBundleUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyBundleUpdate.ProtoReflect.Descriptor instead.
 func (*PolicyBundleUpdate) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{16}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PolicyBundleUpdate) GetPolicyBundle() []byte {
@@ -1247,14 +1334,14 @@ func (x *PolicyBundleUpdate) GetVersion() int32 {
 	return 0
 }
 
-// PolicyDataUpdate indicates policy data was changed at a specific path.
+// PolicyDataUpdate indicates policy data was changed.
 type PolicyDataUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The data path that changed, e.g. `atol/device_settings`.
+	// The data path that changed.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	// The new data value at that path.
+	// The new data value.
 	Data *structpb.Struct `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	// New data version (monotonically increasing).
+	// New data version.
 	Version       int32 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1262,7 +1349,7 @@ type PolicyDataUpdate struct {
 
 func (x *PolicyDataUpdate) Reset() {
 	*x = PolicyDataUpdate{}
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[17]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1274,7 +1361,7 @@ func (x *PolicyDataUpdate) String() string {
 func (*PolicyDataUpdate) ProtoMessage() {}
 
 func (x *PolicyDataUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_atol_api_v1_dpagent_proto_msgTypes[17]
+	mi := &file_atol_api_v1_dpagent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1287,7 +1374,7 @@ func (x *PolicyDataUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyDataUpdate.ProtoReflect.Descriptor instead.
 func (*PolicyDataUpdate) Descriptor() ([]byte, []int) {
-	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{17}
+	return file_atol_api_v1_dpagent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PolicyDataUpdate) GetPath() string {
@@ -1315,7 +1402,12 @@ var File_atol_api_v1_dpagent_proto protoreflect.FileDescriptor
 
 const file_atol_api_v1_dpagent_proto_rawDesc = "" +
 	"\n" +
-	"\x19atol/api/v1/dpagent.proto\x12\vatol.api.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"W\n" +
+	"\x19atol/api/v1/dpagent.proto\x12\vatol.api.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"3\n" +
+	"\x1aListRevokedSessionsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"~\n" +
+	"\x1bListRevokedSessionsResponse\x12.\n" +
+	"\x13revoked_session_ids\x18\x01 \x03(\tR\x11revokedSessionIds\x12/\n" +
+	"\x05as_of\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x04asOf\"W\n" +
 	"\x1fGetSessionDeviceSnapshotRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1d\n" +
 	"\n" +
@@ -1408,13 +1500,14 @@ const file_atol_api_v1_dpagent_proto_rawDesc = "" +
 	"\x10PolicyDataUpdate\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12+\n" +
 	"\x04data\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x04data\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x05R\aversion2\xb4\x04\n" +
+	"\aversion\x18\x03 \x01(\x05R\aversion2\x9e\x05\n" +
 	"\x0eDPAgentService\x12k\n" +
 	"\x14GetBootstrapSnapshot\x12(.atol.api.v1.GetBootstrapSnapshotRequest\x1a).atol.api.v1.GetBootstrapSnapshotResponse\x12g\n" +
 	"\x12IngestDecisionLogs\x12&.atol.api.v1.IngestDecisionLogsRequest\x1a'.atol.api.v1.IngestDecisionLogsResponse(\x01\x12^\n" +
 	"\x0fStreamMutations\x12#.atol.api.v1.StreamMutationsRequest\x1a$.atol.api.v1.StreamMutationsResponse0\x01\x12w\n" +
 	"\x18GetSessionDeviceSnapshot\x12,.atol.api.v1.GetSessionDeviceSnapshotRequest\x1a-.atol.api.v1.GetSessionDeviceSnapshotResponse\x12s\n" +
-	"\x16ReportDeviceDivergence\x12*.atol.api.v1.ReportDeviceDivergenceRequest\x1a+.atol.api.v1.ReportDeviceDivergenceResponse(\x01B\x96\x01\n" +
+	"\x16ReportDeviceDivergence\x12*.atol.api.v1.ReportDeviceDivergenceRequest\x1a+.atol.api.v1.ReportDeviceDivergenceResponse(\x01\x12h\n" +
+	"\x13ListRevokedSessions\x12'.atol.api.v1.ListRevokedSessionsRequest\x1a(.atol.api.v1.ListRevokedSessionsResponseB\x96\x01\n" +
 	"\x0fcom.atol.api.v1B\fDpagentProtoP\x01Z'atol.sh/sdk-go/gen/go/atol/api/v1;apiv1\xa2\x02\x03AAX\xaa\x02\vAtol.Api.V1\xca\x02\vAtol\\Api\\V1\xe2\x02\x17Atol\\Api\\V1\\GPBMetadata\xea\x02\rAtol::Api::V1b\x06proto3"
 
 var (
@@ -1429,60 +1522,65 @@ func file_atol_api_v1_dpagent_proto_rawDescGZIP() []byte {
 	return file_atol_api_v1_dpagent_proto_rawDescData
 }
 
-var file_atol_api_v1_dpagent_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_atol_api_v1_dpagent_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_atol_api_v1_dpagent_proto_goTypes = []any{
-	(*GetSessionDeviceSnapshotRequest)(nil),  // 0: atol.api.v1.GetSessionDeviceSnapshotRequest
-	(*GetSessionDeviceSnapshotResponse)(nil), // 1: atol.api.v1.GetSessionDeviceSnapshotResponse
-	(*ReportDeviceDivergenceRequest)(nil),    // 2: atol.api.v1.ReportDeviceDivergenceRequest
-	(*DeviceDivergenceEvent)(nil),            // 3: atol.api.v1.DeviceDivergenceEvent
-	(*ReportDeviceDivergenceResponse)(nil),   // 4: atol.api.v1.ReportDeviceDivergenceResponse
-	(*GetBootstrapSnapshotRequest)(nil),      // 5: atol.api.v1.GetBootstrapSnapshotRequest
-	(*GetBootstrapSnapshotResponse)(nil),     // 6: atol.api.v1.GetBootstrapSnapshotResponse
-	(*Tuple)(nil),                            // 7: atol.api.v1.Tuple
-	(*IngestDecisionLogsRequest)(nil),        // 8: atol.api.v1.IngestDecisionLogsRequest
-	(*DecisionLog)(nil),                      // 9: atol.api.v1.DecisionLog
-	(*IngestDecisionLogsResponse)(nil),       // 10: atol.api.v1.IngestDecisionLogsResponse
-	(*StreamMutationsRequest)(nil),           // 11: atol.api.v1.StreamMutationsRequest
-	(*StreamMutationsResponse)(nil),          // 12: atol.api.v1.StreamMutationsResponse
-	(*TupleWrite)(nil),                       // 13: atol.api.v1.TupleWrite
-	(*TupleDelete)(nil),                      // 14: atol.api.v1.TupleDelete
-	(*ModelUpdate)(nil),                      // 15: atol.api.v1.ModelUpdate
-	(*PolicyBundleUpdate)(nil),               // 16: atol.api.v1.PolicyBundleUpdate
-	(*PolicyDataUpdate)(nil),                 // 17: atol.api.v1.PolicyDataUpdate
-	(*timestamppb.Timestamp)(nil),            // 18: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),                  // 19: google.protobuf.Struct
+	(*ListRevokedSessionsRequest)(nil),       // 0: atol.api.v1.ListRevokedSessionsRequest
+	(*ListRevokedSessionsResponse)(nil),      // 1: atol.api.v1.ListRevokedSessionsResponse
+	(*GetSessionDeviceSnapshotRequest)(nil),  // 2: atol.api.v1.GetSessionDeviceSnapshotRequest
+	(*GetSessionDeviceSnapshotResponse)(nil), // 3: atol.api.v1.GetSessionDeviceSnapshotResponse
+	(*ReportDeviceDivergenceRequest)(nil),    // 4: atol.api.v1.ReportDeviceDivergenceRequest
+	(*DeviceDivergenceEvent)(nil),            // 5: atol.api.v1.DeviceDivergenceEvent
+	(*ReportDeviceDivergenceResponse)(nil),   // 6: atol.api.v1.ReportDeviceDivergenceResponse
+	(*GetBootstrapSnapshotRequest)(nil),      // 7: atol.api.v1.GetBootstrapSnapshotRequest
+	(*GetBootstrapSnapshotResponse)(nil),     // 8: atol.api.v1.GetBootstrapSnapshotResponse
+	(*Tuple)(nil),                            // 9: atol.api.v1.Tuple
+	(*IngestDecisionLogsRequest)(nil),        // 10: atol.api.v1.IngestDecisionLogsRequest
+	(*DecisionLog)(nil),                      // 11: atol.api.v1.DecisionLog
+	(*IngestDecisionLogsResponse)(nil),       // 12: atol.api.v1.IngestDecisionLogsResponse
+	(*StreamMutationsRequest)(nil),           // 13: atol.api.v1.StreamMutationsRequest
+	(*StreamMutationsResponse)(nil),          // 14: atol.api.v1.StreamMutationsResponse
+	(*TupleWrite)(nil),                       // 15: atol.api.v1.TupleWrite
+	(*TupleDelete)(nil),                      // 16: atol.api.v1.TupleDelete
+	(*ModelUpdate)(nil),                      // 17: atol.api.v1.ModelUpdate
+	(*PolicyBundleUpdate)(nil),               // 18: atol.api.v1.PolicyBundleUpdate
+	(*PolicyDataUpdate)(nil),                 // 19: atol.api.v1.PolicyDataUpdate
+	(*timestamppb.Timestamp)(nil),            // 20: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                  // 21: google.protobuf.Struct
 }
 var file_atol_api_v1_dpagent_proto_depIdxs = []int32{
-	3,  // 0: atol.api.v1.ReportDeviceDivergenceRequest.event:type_name -> atol.api.v1.DeviceDivergenceEvent
-	18, // 1: atol.api.v1.DeviceDivergenceEvent.observed_at:type_name -> google.protobuf.Timestamp
-	7,  // 2: atol.api.v1.GetBootstrapSnapshotResponse.tuples:type_name -> atol.api.v1.Tuple
-	19, // 3: atol.api.v1.GetBootstrapSnapshotResponse.policy_data:type_name -> google.protobuf.Struct
-	9,  // 4: atol.api.v1.IngestDecisionLogsRequest.log:type_name -> atol.api.v1.DecisionLog
-	18, // 5: atol.api.v1.DecisionLog.timestamp:type_name -> google.protobuf.Timestamp
-	19, // 6: atol.api.v1.DecisionLog.context:type_name -> google.protobuf.Struct
-	13, // 7: atol.api.v1.StreamMutationsResponse.tuple_write:type_name -> atol.api.v1.TupleWrite
-	14, // 8: atol.api.v1.StreamMutationsResponse.tuple_delete:type_name -> atol.api.v1.TupleDelete
-	15, // 9: atol.api.v1.StreamMutationsResponse.model_update:type_name -> atol.api.v1.ModelUpdate
-	16, // 10: atol.api.v1.StreamMutationsResponse.policy_bundle_update:type_name -> atol.api.v1.PolicyBundleUpdate
-	17, // 11: atol.api.v1.StreamMutationsResponse.policy_data_update:type_name -> atol.api.v1.PolicyDataUpdate
-	7,  // 12: atol.api.v1.TupleWrite.tuple:type_name -> atol.api.v1.Tuple
-	7,  // 13: atol.api.v1.TupleDelete.tuple:type_name -> atol.api.v1.Tuple
-	19, // 14: atol.api.v1.PolicyDataUpdate.data:type_name -> google.protobuf.Struct
-	5,  // 15: atol.api.v1.DPAgentService.GetBootstrapSnapshot:input_type -> atol.api.v1.GetBootstrapSnapshotRequest
-	8,  // 16: atol.api.v1.DPAgentService.IngestDecisionLogs:input_type -> atol.api.v1.IngestDecisionLogsRequest
-	11, // 17: atol.api.v1.DPAgentService.StreamMutations:input_type -> atol.api.v1.StreamMutationsRequest
-	0,  // 18: atol.api.v1.DPAgentService.GetSessionDeviceSnapshot:input_type -> atol.api.v1.GetSessionDeviceSnapshotRequest
-	2,  // 19: atol.api.v1.DPAgentService.ReportDeviceDivergence:input_type -> atol.api.v1.ReportDeviceDivergenceRequest
-	6,  // 20: atol.api.v1.DPAgentService.GetBootstrapSnapshot:output_type -> atol.api.v1.GetBootstrapSnapshotResponse
-	10, // 21: atol.api.v1.DPAgentService.IngestDecisionLogs:output_type -> atol.api.v1.IngestDecisionLogsResponse
-	12, // 22: atol.api.v1.DPAgentService.StreamMutations:output_type -> atol.api.v1.StreamMutationsResponse
-	1,  // 23: atol.api.v1.DPAgentService.GetSessionDeviceSnapshot:output_type -> atol.api.v1.GetSessionDeviceSnapshotResponse
-	4,  // 24: atol.api.v1.DPAgentService.ReportDeviceDivergence:output_type -> atol.api.v1.ReportDeviceDivergenceResponse
-	20, // [20:25] is the sub-list for method output_type
-	15, // [15:20] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	20, // 0: atol.api.v1.ListRevokedSessionsResponse.as_of:type_name -> google.protobuf.Timestamp
+	5,  // 1: atol.api.v1.ReportDeviceDivergenceRequest.event:type_name -> atol.api.v1.DeviceDivergenceEvent
+	20, // 2: atol.api.v1.DeviceDivergenceEvent.observed_at:type_name -> google.protobuf.Timestamp
+	9,  // 3: atol.api.v1.GetBootstrapSnapshotResponse.tuples:type_name -> atol.api.v1.Tuple
+	21, // 4: atol.api.v1.GetBootstrapSnapshotResponse.policy_data:type_name -> google.protobuf.Struct
+	11, // 5: atol.api.v1.IngestDecisionLogsRequest.log:type_name -> atol.api.v1.DecisionLog
+	20, // 6: atol.api.v1.DecisionLog.timestamp:type_name -> google.protobuf.Timestamp
+	21, // 7: atol.api.v1.DecisionLog.context:type_name -> google.protobuf.Struct
+	15, // 8: atol.api.v1.StreamMutationsResponse.tuple_write:type_name -> atol.api.v1.TupleWrite
+	16, // 9: atol.api.v1.StreamMutationsResponse.tuple_delete:type_name -> atol.api.v1.TupleDelete
+	17, // 10: atol.api.v1.StreamMutationsResponse.model_update:type_name -> atol.api.v1.ModelUpdate
+	18, // 11: atol.api.v1.StreamMutationsResponse.policy_bundle_update:type_name -> atol.api.v1.PolicyBundleUpdate
+	19, // 12: atol.api.v1.StreamMutationsResponse.policy_data_update:type_name -> atol.api.v1.PolicyDataUpdate
+	9,  // 13: atol.api.v1.TupleWrite.tuple:type_name -> atol.api.v1.Tuple
+	9,  // 14: atol.api.v1.TupleDelete.tuple:type_name -> atol.api.v1.Tuple
+	21, // 15: atol.api.v1.PolicyDataUpdate.data:type_name -> google.protobuf.Struct
+	7,  // 16: atol.api.v1.DPAgentService.GetBootstrapSnapshot:input_type -> atol.api.v1.GetBootstrapSnapshotRequest
+	10, // 17: atol.api.v1.DPAgentService.IngestDecisionLogs:input_type -> atol.api.v1.IngestDecisionLogsRequest
+	13, // 18: atol.api.v1.DPAgentService.StreamMutations:input_type -> atol.api.v1.StreamMutationsRequest
+	2,  // 19: atol.api.v1.DPAgentService.GetSessionDeviceSnapshot:input_type -> atol.api.v1.GetSessionDeviceSnapshotRequest
+	4,  // 20: atol.api.v1.DPAgentService.ReportDeviceDivergence:input_type -> atol.api.v1.ReportDeviceDivergenceRequest
+	0,  // 21: atol.api.v1.DPAgentService.ListRevokedSessions:input_type -> atol.api.v1.ListRevokedSessionsRequest
+	8,  // 22: atol.api.v1.DPAgentService.GetBootstrapSnapshot:output_type -> atol.api.v1.GetBootstrapSnapshotResponse
+	12, // 23: atol.api.v1.DPAgentService.IngestDecisionLogs:output_type -> atol.api.v1.IngestDecisionLogsResponse
+	14, // 24: atol.api.v1.DPAgentService.StreamMutations:output_type -> atol.api.v1.StreamMutationsResponse
+	3,  // 25: atol.api.v1.DPAgentService.GetSessionDeviceSnapshot:output_type -> atol.api.v1.GetSessionDeviceSnapshotResponse
+	6,  // 26: atol.api.v1.DPAgentService.ReportDeviceDivergence:output_type -> atol.api.v1.ReportDeviceDivergenceResponse
+	1,  // 27: atol.api.v1.DPAgentService.ListRevokedSessions:output_type -> atol.api.v1.ListRevokedSessionsResponse
+	22, // [22:28] is the sub-list for method output_type
+	16, // [16:22] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_atol_api_v1_dpagent_proto_init() }
@@ -1490,7 +1588,7 @@ func file_atol_api_v1_dpagent_proto_init() {
 	if File_atol_api_v1_dpagent_proto != nil {
 		return
 	}
-	file_atol_api_v1_dpagent_proto_msgTypes[12].OneofWrappers = []any{
+	file_atol_api_v1_dpagent_proto_msgTypes[14].OneofWrappers = []any{
 		(*StreamMutationsResponse_TupleWrite)(nil),
 		(*StreamMutationsResponse_TupleDelete)(nil),
 		(*StreamMutationsResponse_ModelUpdate)(nil),
@@ -1503,7 +1601,7 @@ func file_atol_api_v1_dpagent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_atol_api_v1_dpagent_proto_rawDesc), len(file_atol_api_v1_dpagent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
