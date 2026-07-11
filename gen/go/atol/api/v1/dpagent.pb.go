@@ -23,7 +23,8 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ListRevokedSessionsRequest fetches the session revocation list for an organization.
+// ListRevokedSessionsRequest fetches the session revocation list for an
+// organization.
 type ListRevokedSessionsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization to list revoked sessions for.
@@ -72,7 +73,7 @@ func (x *ListRevokedSessionsRequest) GetOrgId() string {
 // ListRevokedSessionsResponse is the session revocation list.
 type ListRevokedSessionsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Revoked session identifiers (JWT jti values).
+	// Revoked session identifiers (JWT `jti` values).
 	RevokedSessionIds []string `protobuf:"bytes,1,rep,name=revoked_session_ids,json=revokedSessionIds,proto3" json:"revoked_session_ids,omitempty"`
 	// Server time the list was generated at.
 	AsOf          *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=as_of,json=asOf,proto3" json:"as_of,omitempty"`
@@ -129,7 +130,7 @@ type GetSessionDeviceSnapshotRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization the session belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Session identifier (the token's jti claim).
+	// Session identifier (the token's `jti` claim).
 	SessionId     string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -183,17 +184,19 @@ func (x *GetSessionDeviceSnapshotRequest) GetSessionId() string {
 // per session and compares live request signals against.
 type GetSessionDeviceSnapshotResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether a device is bound to the session.
+	// Whether a device is bound to the session. When false, the remaining fields
+	// are unset and the SDK has nothing to compare against.
 	Found bool `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
 	// Bound device identifier.
 	DeviceId string `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	// Bound device's server TLS fingerprint (may be empty for client-only devices).
+	// Bound device's server TLS fingerprint. May be empty for client-only
+	// devices that were never observed at the TLS layer.
 	Ja4 string `protobuf:"bytes,3,opt,name=ja4,proto3" json:"ja4,omitempty"`
-	// Bound device's user-agent family.
+	// Bound device's user-agent family, e.g. `chrome`.
 	UserAgent string `protobuf:"bytes,4,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
-	// Bound device platform (e.g. "macos", "windows").
+	// Bound device platform, e.g. `macos`, `windows`.
 	Platform string `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
-	// Bound device browser family (e.g. "chrome").
+	// Bound device browser family, e.g. `chrome`.
 	BrowserFamily string `protobuf:"bytes,6,opt,name=browser_family,json=browserFamily,proto3" json:"browser_family,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -273,7 +276,8 @@ func (x *GetSessionDeviceSnapshotResponse) GetBrowserFamily() string {
 
 // ReportDeviceDivergenceRequest wraps a single divergence event for streaming.
 type ReportDeviceDivergenceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The divergence event to report.
 	Event         *DeviceDivergenceEvent `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -322,7 +326,7 @@ type DeviceDivergenceEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization the session belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Session identifier (the token's jti claim).
+	// Session identifier (the token's `jti` claim).
 	SessionId string `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// User the session belongs to.
 	UserId string `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -334,7 +338,7 @@ type DeviceDivergenceEvent struct {
 	ObservedUserAgent string `protobuf:"bytes,6,opt,name=observed_user_agent,json=observedUserAgent,proto3" json:"observed_user_agent,omitempty"`
 	// Live client IP observed on this request.
 	ObservedIp string `protobuf:"bytes,7,opt,name=observed_ip,json=observedIp,proto3" json:"observed_ip,omitempty"`
-	// What diverged: "ja4", "user_agent", "ip", or "no_fingerprint".
+	// What diverged: `ja4`, `user_agent`, `ip`, or `no_fingerprint`.
 	DivergenceKind string `protobuf:"bytes,8,opt,name=divergence_kind,json=divergenceKind,proto3" json:"divergence_kind,omitempty"`
 	// When the divergence was observed.
 	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
@@ -440,7 +444,7 @@ type ReportDeviceDivergenceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Number of divergence events accepted.
 	Accepted int32 `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	// Number rejected (e.g. validation failures).
+	// Number rejected, e.g. for validation failures.
 	Rejected      int32 `protobuf:"varint,2,opt,name=rejected,proto3" json:"rejected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -536,20 +540,21 @@ func (x *GetBootstrapSnapshotRequest) GetOrgId() string {
 	return ""
 }
 
-// GetBootstrapSnapshotResponse contains the full authorization and policy state.
+// GetBootstrapSnapshotResponse contains the full authorization and policy state
+// an agent needs to begin serving decisions locally.
 type GetBootstrapSnapshotResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Authorization model as structured YAML config source.
+	// Authorization model in Atol's FGA DSL format.
 	AuthorizationModel string `protobuf:"bytes,1,opt,name=authorization_model,json=authorizationModel,proto3" json:"authorization_model,omitempty"`
 	// All authorization tuples for the organization.
 	Tuples []*Tuple `protobuf:"bytes,2,rep,name=tuples,proto3" json:"tuples,omitempty"`
-	// Active OPA policy bundle (tar.gz).
+	// Active OPA policy bundle as a gzip-compressed tar archive.
 	PolicyBundle []byte `protobuf:"bytes,3,opt,name=policy_bundle,json=policyBundle,proto3" json:"policy_bundle,omitempty"`
-	// OPA data tree content.
+	// OPA data tree content (the `data` document the bundle evaluates against).
 	PolicyData *structpb.Struct `protobuf:"bytes,4,opt,name=policy_data,json=policyData,proto3" json:"policy_data,omitempty"`
-	// Token for requesting incremental updates after bootstrap.
+	// Token for requesting incremental updates via StreamMutations.
 	ContinuationToken string `protobuf:"bytes,5,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
-	// Version of the active policy bundle (auto-incrementing).
+	// Version of the active policy bundle (monotonically increasing).
 	PolicyBundleVersion int32 `protobuf:"varint,6,opt,name=policy_bundle_version,json=policyBundleVersion,proto3" json:"policy_bundle_version,omitempty"`
 	// Highest version among all policy data paths.
 	PolicyDataVersion int32 `protobuf:"varint,7,opt,name=policy_data_version,json=policyDataVersion,proto3" json:"policy_data_version,omitempty"`
@@ -636,14 +641,15 @@ func (x *GetBootstrapSnapshotResponse) GetPolicyDataVersion() int32 {
 	return 0
 }
 
-// Tuple is an authorization relationship triple.
+// Tuple is an authorization relationship triple: `user` has `relation` on
+// `object`.
 type Tuple struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// User identifier in "type:id" format.
+	// Subject in `type:id` form, e.g. `user:alice`.
 	User string `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	// Relation name.
+	// Relation name, e.g. `editor`.
 	Relation string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
-	// Object identifier in "type:id" format.
+	// Object in `type:id` form, e.g. `document:readme`.
 	Object        string `protobuf:"bytes,3,opt,name=object,proto3" json:"object,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -703,7 +709,7 @@ func (x *Tuple) GetObject() string {
 // IngestDecisionLogsRequest wraps a single decision log entry for streaming.
 type IngestDecisionLogsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The decision log entry.
+	// The decision log entry to persist.
 	Log           *DecisionLog `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -751,17 +757,17 @@ type DecisionLog struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization this decision belongs to.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Unique request identifier for correlation.
+	// Unique request identifier for correlation across systems.
 	RequestId string `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// When the decision was made.
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	// SPIFFE ID or identity of the actor making the request.
 	ActorIdentity string `protobuf:"bytes,4,opt,name=actor_identity,json=actorIdentity,proto3" json:"actor_identity,omitempty"`
-	// Authentication method used: "oidc", "spiffe", "api_key".
+	// Authentication method used: `oidc`, `spiffe`, or `api_key`.
 	AuthMethod string `protobuf:"bytes,5,opt,name=auth_method,json=authMethod,proto3" json:"auth_method,omitempty"`
-	// Action being authorized (e.g., "read", "write", "delete").
+	// Action being authorized, e.g. `read`, `write`, `delete`.
 	Action string `protobuf:"bytes,6,opt,name=action,proto3" json:"action,omitempty"`
-	// Resource being accessed (e.g., "document:readme").
+	// Resource being accessed in `type:id` form, e.g. `document:readme`.
 	Resource string `protobuf:"bytes,7,opt,name=resource,proto3" json:"resource,omitempty"`
 	// Whether the request was allowed.
 	Allowed bool `protobuf:"varint,8,opt,name=allowed,proto3" json:"allowed,omitempty"`
@@ -769,9 +775,9 @@ type DecisionLog struct {
 	MatchedRule string `protobuf:"bytes,9,opt,name=matched_rule,json=matchedRule,proto3" json:"matched_rule,omitempty"`
 	// Evaluation latency in microseconds.
 	EvalUs int32 `protobuf:"varint,10,opt,name=eval_us,json=evalUs,proto3" json:"eval_us,omitempty"`
-	// Number of Zanzibar calls made during evaluation.
+	// Number of Zanzibar checks performed during evaluation.
 	ZanzibarCalls int32 `protobuf:"varint,11,opt,name=zanzibar_calls,json=zanzibarCalls,proto3" json:"zanzibar_calls,omitempty"`
-	// Additional decision context (e.g., matched conditions).
+	// Additional decision context, e.g. matched conditions.
 	Context       *structpb.Struct `protobuf:"bytes,12,opt,name=context,proto3" json:"context,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -894,9 +900,9 @@ func (x *DecisionLog) GetContext() *structpb.Struct {
 // IngestDecisionLogsResponse summarizes the ingestion outcome.
 type IngestDecisionLogsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Number of decision logs successfully accepted.
+	// Number of decision logs accepted.
 	Accepted int32 `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	// Number of decision logs rejected (e.g., validation failures).
+	// Number rejected, e.g. for validation failures.
 	Rejected      int32 `protobuf:"varint,2,opt,name=rejected,proto3" json:"rejected,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -951,7 +957,8 @@ type StreamMutationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Organization to stream mutations for.
 	OrgId string `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	// Continuation token from bootstrap or previous stream.
+	// Continuation token from bootstrap or a previous stream. The server resumes
+	// delivery from the position this token encodes.
 	ContinuationToken string `protobuf:"bytes,2,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -1001,10 +1008,11 @@ func (x *StreamMutationsRequest) GetContinuationToken() string {
 	return ""
 }
 
-// StreamMutationsResponse wraps a single mutation event.
+// StreamMutationsResponse delivers a single mutation plus the updated
+// continuation token to resume from.
 type StreamMutationsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The mutation that occurred.
+	// The mutation that occurred. Exactly one variant is set per message.
 	//
 	// Types that are valid to be assigned to Mutation:
 	//
@@ -1014,7 +1022,7 @@ type StreamMutationsResponse struct {
 	//	*StreamMutationsResponse_PolicyBundleUpdate
 	//	*StreamMutationsResponse_PolicyDataUpdate
 	Mutation isStreamMutationsResponse_Mutation `protobuf_oneof:"mutation"`
-	// Updated continuation token after this mutation.
+	// Updated continuation token to present on reconnect after this mutation.
 	ContinuationToken string `protobuf:"bytes,6,opt,name=continuation_token,json=continuationToken,proto3" json:"continuation_token,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -1114,22 +1122,27 @@ type isStreamMutationsResponse_Mutation interface {
 }
 
 type StreamMutationsResponse_TupleWrite struct {
+	// A new authorization tuple was written.
 	TupleWrite *TupleWrite `protobuf:"bytes,1,opt,name=tuple_write,json=tupleWrite,proto3,oneof"`
 }
 
 type StreamMutationsResponse_TupleDelete struct {
+	// An authorization tuple was removed.
 	TupleDelete *TupleDelete `protobuf:"bytes,2,opt,name=tuple_delete,json=tupleDelete,proto3,oneof"`
 }
 
 type StreamMutationsResponse_ModelUpdate struct {
+	// The authorization model changed.
 	ModelUpdate *ModelUpdate `protobuf:"bytes,3,opt,name=model_update,json=modelUpdate,proto3,oneof"`
 }
 
 type StreamMutationsResponse_PolicyBundleUpdate struct {
+	// A new policy bundle was activated.
 	PolicyBundleUpdate *PolicyBundleUpdate `protobuf:"bytes,4,opt,name=policy_bundle_update,json=policyBundleUpdate,proto3,oneof"`
 }
 
 type StreamMutationsResponse_PolicyDataUpdate struct {
+	// A policy data path changed.
 	PolicyDataUpdate *PolicyDataUpdate `protobuf:"bytes,5,opt,name=policy_data_update,json=policyDataUpdate,proto3,oneof"`
 }
 
@@ -1145,8 +1158,9 @@ func (*StreamMutationsResponse_PolicyDataUpdate) isStreamMutationsResponse_Mutat
 
 // TupleWrite indicates a new authorization tuple was written.
 type TupleWrite struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tuple         *Tuple                 `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The tuple that was written.
+	Tuple         *Tuple `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1190,8 +1204,9 @@ func (x *TupleWrite) GetTuple() *Tuple {
 
 // TupleDelete indicates an authorization tuple was removed.
 type TupleDelete struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tuple         *Tuple                 `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The tuple that was removed.
+	Tuple         *Tuple `protobuf:"bytes,1,opt,name=tuple,proto3" json:"tuple,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1282,9 +1297,9 @@ func (x *ModelUpdate) GetAuthorizationModel() string {
 // PolicyBundleUpdate indicates a new policy bundle was activated.
 type PolicyBundleUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The new policy bundle (tar.gz).
+	// The new policy bundle as a gzip-compressed tar archive.
 	PolicyBundle []byte `protobuf:"bytes,1,opt,name=policy_bundle,json=policyBundle,proto3" json:"policy_bundle,omitempty"`
-	// New bundle version.
+	// New bundle version (monotonically increasing).
 	Version       int32 `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1334,14 +1349,14 @@ func (x *PolicyBundleUpdate) GetVersion() int32 {
 	return 0
 }
 
-// PolicyDataUpdate indicates policy data was changed.
+// PolicyDataUpdate indicates policy data was changed at a specific path.
 type PolicyDataUpdate struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The data path that changed.
+	// The data path that changed, e.g. `atol/device_settings`.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	// The new data value.
+	// The new data value at that path.
 	Data *structpb.Struct `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	// New data version.
+	// New data version (monotonically increasing).
 	Version       int32 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
