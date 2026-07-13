@@ -15,6 +15,10 @@ import (
 // sequential single-tuple writes (ADR 0020).
 var ErrNotTransactional = errors.New("store does not support transactional writes")
 
+// ErrNotReplaceable is returned by ReplaceRelationships when the underlying
+// store cannot serialize and atomically replace a bounded relationship set.
+var ErrNotReplaceable = errors.New("store does not support transactional relationship replacement")
+
 // minHolders returns the declared minimum-holder floor for (objectType,
 // relation) under the resolved model, or 0 if there is no floor (or no model).
 func (e *Engine) minHolders(ctx context.Context, objectType, relation string) int {
@@ -119,9 +123,9 @@ func containsDirect(tuples []model.Tuple, want model.Tuple) bool {
 // WriteRelationships applies writes and deletes atomically: all writes (upsert/
 // idempotent) then all deletes (no-op when absent) in one store transaction,
 // all-or-nothing (ADR 0020). Every write is model-validated before the
-// transaction, so an invalid write aborts with zero side effects. The notifier
-// fan-out (OnTupleWrite per write, then OnTupleDelete per delete) runs only
-// after a successful commit, never on error. An empty batch is a no-op.
+// transaction, so an invalid write aborts with zero side effects. A precommit
+// recorder receives all writes then all deletes before the store transaction;
+// otherwise notifier fan-out runs only after a successful commit. An empty batch is a no-op.
 // Returns ErrNotTransactional if the store does not implement store.TupleTxStore.
 func (e *Engine) WriteRelationships(ctx context.Context, writes, deletes []model.Tuple) error {
 	if len(writes) == 0 && len(deletes) == 0 {
@@ -143,15 +147,99 @@ func (e *Engine) WriteRelationships(ctx context.Context, writes, deletes []model
 		}
 	}
 
+	recorded := false
+	for _, t := range writes {
+		used, err := e.recordTupleWrite(ctx, t)
+		if err != nil {
+			return err
+		}
+		recorded = recorded || used
+	}
+	for _, t := range deletes {
+		used, err := e.recordTupleDelete(ctx, t)
+		if err != nil {
+			return err
+		}
+		recorded = recorded || used
+	}
+
 	if err := tx.WriteTx(ctx, writes, deletes); err != nil {
 		return fmt.Errorf("write tx: %w", err)
 	}
 
-	for _, t := range writes {
-		e.notifier.OnTupleWrite(ctx, t)
-	}
-	for _, t := range deletes {
-		e.notifier.OnTupleDelete(ctx, t)
+	if !recorded {
+		for _, t := range writes {
+			e.notifier.OnTupleWrite(ctx, t)
+		}
+		for _, t := range deletes {
+			e.notifier.OnTupleDelete(ctx, t)
+		}
 	}
 	return nil
+}
+
+// ReplaceRelationships atomically replaces all tuples matching one bounded
+// object/relation filter. Delta calculation happens after the store serializes
+// concurrent replacements, so a completed call leaves exactly replacements.
+// Precommit recorders run inside that transaction before any tuple mutation.
+func (e *Engine) ReplaceRelationships(ctx context.Context, filter model.TupleFilter, replacements []model.Tuple) error {
+	if filter.ObjectType == "" || filter.ObjectID == "" || filter.Relation == "" {
+		return fmt.Errorf("replace relationships requires object_type, object_id, and relation")
+	}
+
+	tm := e.resolveModel(ctx, "")
+	for _, tuple := range replacements {
+		if !tupleMatchesFilter(tuple, filter) {
+			return fmt.Errorf("replacement tuple %s#%s@%s does not match filter", tuple.ObjectKey(), tuple.Relation, tuple.UserKey())
+		}
+		if tm != nil && tm.model != nil {
+			if err := model.ValidateTuple(tm.model, tuple); err != nil {
+				return fmt.Errorf("validate replacement %s#%s@%s: %w", tuple.ObjectKey(), tuple.Relation, tuple.UserKey(), err)
+			}
+		}
+	}
+
+	replacer, ok := e.store.(store.TupleReplaceStore)
+	if !ok {
+		return ErrNotReplaceable
+	}
+	recorded := false
+	writes, deletes, err := replacer.ReplaceTx(ctx, filter, replacements, func(writes, deletes []model.Tuple) error {
+		for _, tuple := range writes {
+			used, recordErr := e.recordTupleWrite(ctx, tuple)
+			if recordErr != nil {
+				return recordErr
+			}
+			recorded = recorded || used
+		}
+		for _, tuple := range deletes {
+			used, recordErr := e.recordTupleDelete(ctx, tuple)
+			if recordErr != nil {
+				return recordErr
+			}
+			recorded = recorded || used
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("replace relationships: %w", err)
+	}
+	if !recorded {
+		for _, tuple := range writes {
+			e.notifier.OnTupleWrite(ctx, tuple)
+		}
+		for _, tuple := range deletes {
+			e.notifier.OnTupleDelete(ctx, tuple)
+		}
+	}
+	return nil
+}
+
+func tupleMatchesFilter(tuple model.Tuple, filter model.TupleFilter) bool {
+	return (filter.ObjectType == "" || tuple.ObjectType == filter.ObjectType) &&
+		(filter.ObjectID == "" || tuple.ObjectID == filter.ObjectID) &&
+		(filter.Relation == "" || tuple.Relation == filter.Relation) &&
+		(filter.UserType == "" || tuple.UserType == filter.UserType) &&
+		(filter.UserID == "" || tuple.UserID == filter.UserID) &&
+		(filter.UserRelation == "" || tuple.UserRelation == filter.UserRelation)
 }

@@ -20,6 +20,16 @@ type ChangeNotifier interface {
 	OnModelUpdate(ctx context.Context, tenantID string, m *model.Model)
 }
 
+// PrecommitTupleRecorder durably records tuple mutations before the tuple
+// store is changed. Implementations are expected to participate in the same
+// transaction as the tuple store so a later store failure rolls back both.
+// Engines suppress postcommit tuple notifications when this capability is
+// present on the configured ChangeNotifier.
+type PrecommitTupleRecorder interface {
+	RecordTupleWrite(ctx context.Context, t model.Tuple) error
+	RecordTupleDelete(ctx context.Context, t model.Tuple) error
+}
+
 // NoopNotifier is a ChangeNotifier that does nothing.
 type NoopNotifier struct{}
 

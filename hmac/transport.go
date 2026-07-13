@@ -9,13 +9,14 @@ package hmac
 import (
 	"bytes"
 	stdhmac "crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -28,9 +29,9 @@ import (
 //
 //	ATOL-HMAC-SHA256\n<unix-timestamp>\n<METHOD>\n<path>\n<sha256(body)-hex>
 //
-// For Connect streaming and gRPC content types the body hash is the
-// empty-string hash (the server-side BodyHashMiddleware skips body
-// reading for streams), so the transport mirrors that rule.
+// Connect and gRPC streams use stream-hmac-v1: every request envelope is
+// authenticated and chained, and an authenticated close frame prevents
+// truncation. Unary HMAC remains byte-for-byte compatible.
 //
 // `base` may be nil; http.DefaultTransport is used in that case.
 // `keyID` and `secretKey` are required -- empty strings produce
@@ -49,12 +50,36 @@ type transport struct {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	ct := req.Header.Get("Content-Type")
-	isStreaming := strings.Contains(ct, "connect+streaming") ||
-		strings.Contains(ct, "grpc")
+	isStreaming := IsStreamingContentType(req.Header.Get("Content-Type"))
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	r := req.Clone(req.Context())
+
+	if isStreaming {
+		if req.Body == nil {
+			return nil, fmt.Errorf("streaming HMAC request body is required")
+		}
+		nonceBytes := make([]byte, StreamNonceBytes)
+		if _, err := rand.Read(nonceBytes); err != nil {
+			return nil, fmt.Errorf("generate streaming HMAC nonce: %w", err)
+		}
+		nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+		signature := ComputeStreamInit(t.secretKey, timestamp, req.Method, req.URL.Path, nonce)
+		streamKey, err := DeriveStreamKey(t.secretKey, timestamp, req.Method, req.URL.Path, nonce)
+		if err != nil {
+			return nil, err
+		}
+		r.Header.Set("Authorization", fmt.Sprintf(
+			"ATOL-HMAC-SHA256 Credential=%s,Timestamp=%s,Signature=%s,Protocol=%s,Nonce=%s",
+			t.keyID, timestamp, signature, StreamProtocol, nonce))
+		r.Body = NewStreamBody(req.Context(), req.Body, streamKey)
+		r.ContentLength = -1
+		r.GetBody = nil
+		r.Header.Del("Content-Length")
+		return t.base.RoundTrip(r)
+	}
 
 	var bodyBytes []byte
-	if !isStreaming && req.Body != nil {
+	if req.Body != nil {
 		var err error
 		bodyBytes, err = io.ReadAll(req.Body)
 		if err != nil {
@@ -64,16 +89,13 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	bodyHash := sha256Hex(bodyBytes)
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	signature := compute(t.secretKey, timestamp, req.Method, req.URL.Path, bodyHash)
 
-	r := req.Clone(req.Context())
 	r.Header.Set("Authorization", fmt.Sprintf(
 		"ATOL-HMAC-SHA256 Credential=%s,Timestamp=%s,Signature=%s",
 		t.keyID, timestamp, signature))
-	if !isStreaming {
-		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	r.ContentLength = int64(len(bodyBytes))
 	return t.base.RoundTrip(r)
 }
 

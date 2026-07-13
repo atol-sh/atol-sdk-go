@@ -53,3 +53,22 @@ type TupleTxStore interface {
 	// Any error rolls back the whole set, leaving the store unchanged.
 	WriteTx(ctx context.Context, writes, deletes []model.Tuple) error
 }
+
+// TuplePrecommit runs after a replacement store has serialized and computed
+// the exact relationship delta, but before it mutates the store. Persistent
+// implementations invoke it inside their transaction so durable audit records
+// and relationship changes commit or roll back together.
+type TuplePrecommit func(writes, deletes []model.Tuple) error
+
+// TupleReplaceStore is an optional capability for replacing every tuple that
+// matches one bounded object/relation filter. The store must serialize
+// concurrent replacements, compute the exact delta while serialized, invoke
+// precommit before mutation, and apply the delta atomically.
+type TupleReplaceStore interface {
+	ReplaceTx(
+		ctx context.Context,
+		filter model.TupleFilter,
+		replacements []model.Tuple,
+		precommit TuplePrecommit,
+	) (writes, deletes []model.Tuple, err error)
+}

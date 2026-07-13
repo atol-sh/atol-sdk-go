@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"atol.sh/sdk-go/zanzibar/model"
@@ -154,6 +155,41 @@ func (s *MemoryStore) WriteTx(_ context.Context, writes, deletes []model.Tuple) 
 	return nil
 }
 
+// ReplaceTx atomically replaces the tuples matching filter under one write
+// lock. Holding the lock across delta computation, precommit, and mutation
+// gives concurrent replacements exact last-writer semantics.
+func (s *MemoryStore) ReplaceTx(
+	_ context.Context,
+	filter model.TupleFilter,
+	replacements []model.Tuple,
+	precommit TuplePrecommit,
+) ([]model.Tuple, []model.Tuple, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current := make([]model.Tuple, 0)
+	for _, tuples := range s.byObjectRelation {
+		for _, tuple := range tuples {
+			if matchesFilter(tuple, filter) {
+				current = append(current, tuple)
+			}
+		}
+	}
+	writes, deletes := ReplacementDiff(current, replacements)
+	if precommit != nil {
+		if err := precommit(writes, deletes); err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, tuple := range writes {
+		s.writeLocked(tuple)
+	}
+	for _, tuple := range deletes {
+		s.deleteLocked(tuple)
+	}
+	return writes, deletes, nil
+}
+
 func (s *MemoryStore) Read(_ context.Context, filter model.TupleFilter) ([]model.Tuple, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -267,6 +303,33 @@ func matchesFilter(t model.Tuple, f model.TupleFilter) bool {
 		return false
 	}
 	return true
+}
+
+// ReplacementDiff returns the tuples that must be written and deleted to
+// transform current into replacements. Results are sorted by tuple key so
+// precommit audit ordering is deterministic.
+func ReplacementDiff(current, replacements []model.Tuple) (writes, deletes []model.Tuple) {
+	currentSet := make(map[string]model.Tuple, len(current))
+	for _, tuple := range current {
+		currentSet[tupleKey(tuple)] = tuple
+	}
+	replacementSet := make(map[string]model.Tuple, len(replacements))
+	for _, tuple := range replacements {
+		replacementSet[tupleKey(tuple)] = tuple
+	}
+	for key, tuple := range replacementSet {
+		if _, exists := currentSet[key]; !exists {
+			writes = append(writes, tuple)
+		}
+	}
+	for key, tuple := range currentSet {
+		if _, exists := replacementSet[key]; !exists {
+			deletes = append(deletes, tuple)
+		}
+	}
+	sort.Slice(writes, func(i, j int) bool { return tupleKey(writes[i]) < tupleKey(writes[j]) })
+	sort.Slice(deletes, func(i, j int) bool { return tupleKey(deletes[i]) < tupleKey(deletes[j]) })
+	return writes, deletes
 }
 
 // CountByObjectType returns the number of tuples grouped by object type.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	atol "atol.sh/sdk-go"
+	sdkhmac "atol.sh/sdk-go/hmac"
 )
 
 // TestNewHMACTransport_SignsCanonicalEnvelope drives a unary request through
@@ -75,45 +77,66 @@ func TestNewHMACTransport_SignsCanonicalEnvelope(t *testing.T) {
 	}
 }
 
-// TestNewHMACTransport_StreamingSkipsBodyHash mirrors the BodyHashMiddleware
-// rule: when Content-Type is connect+streaming or grpc, the body hash is
-// the empty-string hash (e3b0...) regardless of the actual body bytes.
-// Without this, the server's verifier (which sets bodyHash =
-// EmptyBodyHash for streaming) and the client would diverge and every
-// stream would 401.
-func TestNewHMACTransport_StreamingSkipsBodyHash(t *testing.T) {
+// TestNewHMACTransport_StreamingUsesAuthenticatedFrames verifies the breaking
+// stream-hmac-v1 boundary: the init request is signed with a random nonce and
+// the body unwraps to the original Connect envelope only with the derived key.
+func TestNewHMACTransport_StreamingUsesAuthenticatedFrames(t *testing.T) {
 	const path = "/atol.api.v1.DPAgentService/StreamMutations"
 	const secret = "secret"
+	originalBody := connectEnvelope(0, []byte("message"))
 
 	cases := []struct{ name, contentType string }{
-		{"connect-streaming", "application/connect+streaming+proto"},
+		{"connect-proto", "application/connect+proto"},
+		{"connect-json", "application/connect+json"},
 		{"grpc", "application/grpc"},
 		{"grpc-web", "application/grpc-web+proto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var captured *http.Request
+			var capturedHeader http.Header
+			var capturedBody []byte
 			srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				captured = r
+				capturedHeader = r.Header.Clone()
+				capturedBody, _ = io.ReadAll(r.Body)
 			}))
 			defer srv.Close()
 
 			client := &http.Client{Transport: atol.NewHMACTransport("kid", secret, nil)}
-			req, _ := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader("any-body"))
+			req, _ := http.NewRequest(http.MethodPost, srv.URL+path, bytes.NewReader(originalBody))
 			req.Header.Set("Content-Type", tc.contentType)
 			if _, err := client.Do(req); err != nil {
 				t.Fatalf("client.Do: %v", err)
 			}
 
-			parts := splitHMAC(strings.TrimPrefix(captured.Header.Get("Authorization"), "ATOL-HMAC-SHA256 "))
-			emptyHash := sha256Hex(nil)
-			wantSig := computeWantSig(secret, parts["Timestamp"], http.MethodPost, path, emptyHash)
-			if parts["Signature"] != wantSig {
-				t.Errorf("streaming signature should use EmptyBodyHash; got %s want %s",
-					parts["Signature"], wantSig)
+			parts := splitHMAC(strings.TrimPrefix(capturedHeader.Get("Authorization"), "ATOL-HMAC-SHA256 "))
+			if parts["Protocol"] != sdkhmac.StreamProtocol || parts["Nonce"] == "" {
+				t.Fatalf("stream header = %v", parts)
+			}
+			wantSignature := sdkhmac.ComputeStreamInit(secret, parts["Timestamp"], http.MethodPost, path, parts["Nonce"])
+			if parts["Signature"] != wantSignature {
+				t.Fatalf("stream init signature = %q, want %q", parts["Signature"], wantSignature)
+			}
+			streamKey, err := sdkhmac.DeriveStreamKey(secret, parts["Timestamp"], http.MethodPost, path, parts["Nonce"])
+			if err != nil {
+				t.Fatalf("DeriveStreamKey: %v", err)
+			}
+			unwrapped, err := io.ReadAll(sdkhmac.NewVerifiedStreamBody(io.NopCloser(bytes.NewReader(capturedBody)), streamKey))
+			if err != nil {
+				t.Fatalf("verify stream body: %v", err)
+			}
+			if !bytes.Equal(unwrapped, originalBody) {
+				t.Fatalf("unwrapped body = %x, want %x", unwrapped, originalBody)
 			}
 		})
 	}
+}
+
+func connectEnvelope(flags byte, payload []byte) []byte {
+	frame := make([]byte, 5+len(payload))
+	frame[0] = flags
+	binary.BigEndian.PutUint32(frame[1:5], uint32(len(payload)))
+	copy(frame[5:], payload)
+	return frame
 }
 
 // TestNewHMACTransport_NilBaseUsesDefault pins the documented default --

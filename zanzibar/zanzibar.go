@@ -247,10 +247,16 @@ func (e *Engine) WriteTuple(ctx context.Context, user, relation, object string) 
 		}
 	}
 
+	recorded, err := e.recordTupleWrite(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err := e.store.Write(ctx, t); err != nil {
 		return err
 	}
-	e.notifier.OnTupleWrite(ctx, t)
+	if !recorded {
+		e.notifier.OnTupleWrite(ctx, t)
+	}
 	return nil
 }
 
@@ -278,17 +284,29 @@ func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string)
 		if !ok {
 			return fmt.Errorf("delete %s#%s@%s: relation requires a minimum-holder floor but store does not implement store.ConditionalDeleter", object, relation, user)
 		}
+		recorded, err := e.recordTupleDelete(ctx, t)
+		if err != nil {
+			return err
+		}
 		if err := deleter.DeleteIfAbove(ctx, t, min); err != nil {
 			return err
 		}
-		e.notifier.OnTupleDelete(ctx, t)
+		if !recorded {
+			e.notifier.OnTupleDelete(ctx, t)
+		}
 		return nil
 	}
 
+	recorded, err := e.recordTupleDelete(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err := e.store.Delete(ctx, t); err != nil {
 		return err
 	}
-	e.notifier.OnTupleDelete(ctx, t)
+	if !recorded {
+		e.notifier.OnTupleDelete(ctx, t)
+	}
 	return nil
 }
 
@@ -364,10 +382,16 @@ func (e *Engine) WriteRawTuple(ctx context.Context, user, relation, object strin
 		UserRelation: userRelation,
 	}
 
+	recorded, err := e.recordTupleWrite(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err := e.store.Write(ctx, t); err != nil {
 		return fmt.Errorf("write raw tuple %s#%s@%s: %w", object, relation, user, err)
 	}
-	e.notifier.OnTupleWrite(ctx, t)
+	if !recorded {
+		e.notifier.OnTupleWrite(ctx, t)
+	}
 	return nil
 }
 
@@ -387,11 +411,39 @@ func (e *Engine) DeleteRawTuple(ctx context.Context, user, relation, object stri
 		UserRelation: userRelation,
 	}
 
+	recorded, err := e.recordTupleDelete(ctx, t)
+	if err != nil {
+		return err
+	}
 	if err := e.store.Delete(ctx, t); err != nil {
 		return fmt.Errorf("delete raw tuple %s#%s@%s: %w", object, relation, user, err)
 	}
-	e.notifier.OnTupleDelete(ctx, t)
+	if !recorded {
+		e.notifier.OnTupleDelete(ctx, t)
+	}
 	return nil
+}
+
+func (e *Engine) recordTupleWrite(ctx context.Context, t model.Tuple) (bool, error) {
+	recorder, ok := e.notifier.(zSync.PrecommitTupleRecorder)
+	if !ok {
+		return false, nil
+	}
+	if err := recorder.RecordTupleWrite(ctx, t); err != nil {
+		return true, fmt.Errorf("record tuple write %s#%s@%s: %w", t.ObjectKey(), t.Relation, t.UserKey(), err)
+	}
+	return true, nil
+}
+
+func (e *Engine) recordTupleDelete(ctx context.Context, t model.Tuple) (bool, error) {
+	recorder, ok := e.notifier.(zSync.PrecommitTupleRecorder)
+	if !ok {
+		return false, nil
+	}
+	if err := recorder.RecordTupleDelete(ctx, t); err != nil {
+		return true, fmt.Errorf("record tuple delete %s#%s@%s: %w", t.ObjectKey(), t.Relation, t.UserKey(), err)
+	}
+	return true, nil
 }
 
 // ReadTuples returns tuples matching the filter.
