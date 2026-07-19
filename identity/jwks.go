@@ -23,8 +23,9 @@ type JWKSFetcher struct {
 
 	// forcedAt is the time of the last unknown-kid forced refresh.
 	// Forced refreshes bypass the TTL (so rotated-in keys validate
-	// immediately) but are rate-limited to minForceInterval to prevent
-	// a stampede from tokens carrying bogus kids.
+	// promptly) but are paced to minForceInterval to prevent a stampede
+	// from tokens carrying bogus kids. Callers inside the interval wait for
+	// the next refresh instead of receiving a known-stale key set.
 	forcedAt         time.Time
 	minForceInterval time.Duration
 }
@@ -34,7 +35,7 @@ func NewJWKSFetcher(jwksURL string) *JWKSFetcher {
 	return &JWKSFetcher{
 		jwksURL:          jwksURL,
 		ttl:              5 * time.Minute,
-		minForceInterval: 15 * time.Second,
+		minForceInterval: time.Second,
 	}
 }
 
@@ -66,20 +67,55 @@ func (f *JWKSFetcher) refresh(ctx context.Context) (*jose.JSONWebKeySet, error) 
 	return f.fetchLocked(ctx)
 }
 
-// forceRefresh fetches the JWKS regardless of TTL. Used on unknown-kid
-// cache misses so a freshly rotated-in signing key validates immediately
-// instead of failing for up to the TTL. Rate-limited to minForceInterval;
-// within the window the current cached set is returned.
-func (f *JWKSFetcher) forceRefresh(ctx context.Context) (*jose.JSONWebKeySet, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+// forceRefresh fetches the JWKS regardless of TTL. It is used on unknown-kid
+// cache misses so a freshly introduced signing key does not fail validation
+// for up to the normal cache TTL.
+//
+// Fetches are paced to minForceInterval. A caller inside that interval waits
+// until a refresh is allowed; if another caller refreshes the same snapshot
+// first, all waiters reuse that result. This bounds fetch throughput without
+// incorrectly treating a stale cache as proof that a new kid is invalid.
+func (f *JWKSFetcher) forceRefresh(
+	ctx context.Context,
+	kid string,
+	seen *jose.JSONWebKeySet,
+) (*jose.JSONWebKeySet, error) {
+	for {
+		f.mu.Lock()
 
-	if f.keys != nil && time.Since(f.forcedAt) < f.minForceInterval {
-		return f.keys, nil
+		// Another caller may have refreshed while this caller was waiting for
+		// the lock. Reuse that result, whether it contains the requested kid or
+		// confirms the miss against a newer snapshot.
+		if f.keys != seen {
+			keys := f.keys
+			f.mu.Unlock()
+			return keys, nil
+		}
+		if f.keys != nil && len(f.keys.Key(kid)) > 0 {
+			keys := f.keys
+			f.mu.Unlock()
+			return keys, nil
+		}
+
+		wait := f.minForceInterval - time.Since(f.forcedAt)
+		if f.forcedAt.IsZero() || wait <= 0 {
+			f.forcedAt = time.Now()
+			keys, err := f.fetchLocked(ctx)
+			f.mu.Unlock()
+			return keys, err
+		}
+		f.mu.Unlock()
+
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	f.forcedAt = time.Now()
-
-	return f.fetchLocked(ctx)
 }
 
 // fetchLocked performs the HTTP fetch and updates the cache. Caller must
@@ -130,8 +166,9 @@ func (f *JWKSFetcher) FindKey(ctx context.Context, kid string) ([]jose.JSONWebKe
 
 	// Cache miss — the kid is unknown. Force a real refresh (bypassing the
 	// TTL) in case the provider rotated keys or was restarted with a new
-	// signing key. Rate-limited inside forceRefresh to prevent stampedes.
-	keys, err = f.forceRefresh(ctx)
+	// signing key. forceRefresh paces and coalesces callers to prevent a
+	// bogus-kid stampede without returning a known-stale snapshot.
+	keys, err = f.forceRefresh(ctx, kid, keys)
 	if err != nil {
 		return nil, err
 	}

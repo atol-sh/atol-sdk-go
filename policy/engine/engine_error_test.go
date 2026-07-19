@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -93,10 +94,9 @@ allow := true if { input.relation == "relation-that-never-matches" }
 	}
 }
 
-// TestEvaluate_MatchedRuleIsActualQueryPath pins that the engine reports
-// the real matched query path -- not a hardcoded value -- so decision logs
-// show which rule produced the decision.
-func TestEvaluate_MatchedRuleIsActualQueryPath(t *testing.T) {
+// TestEvaluate_UsesSingleCanonicalQuery pins the architecture contract: one
+// OPA query selects and normalizes every supported policy output shape.
+func TestEvaluate_UsesSingleCanonicalQuery(t *testing.T) {
 	e, ctx := newErrorTestEngine(t, `package atol
 import rego.v1
 default allow := false
@@ -110,9 +110,76 @@ allow if zanzibar.check(input.user, input.relation, input.object)
 	if !result.Allowed {
 		t.Fatalf("allowed = false, want true. trace=%v", result.Trace)
 	}
-	// The resource-type-specific path has no rules, so the generic
-	// boolean path is the one that matched.
 	if result.MatchedRule != "data.atol.allow" {
 		t.Errorf("MatchedRule = %q, want data.atol.allow", result.MatchedRule)
+	}
+	if len(result.EvaluatedRulePaths) != 1 || result.EvaluatedRulePaths[0] != policyDecisionQuery {
+		t.Errorf("EvaluatedRulePaths = %v, want [%s]", result.EvaluatedRulePaths, policyDecisionQuery)
+	}
+}
+
+func TestEvaluate_StructuredDecisionPrecedesBoolean(t *testing.T) {
+	e, ctx := newErrorTestEngine(t, `package atol
+import rego.v1
+allow := true
+decision := {"allow": false, "reason": "structured decision selected"}
+`)
+
+	result, err := e.Evaluate(ctx, errorTestInput)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if result.Allowed || result.Reason != "structured decision selected" {
+		t.Fatalf("result = %+v, want structured deny", result)
+	}
+}
+
+func TestEvaluate_ResourceTypeIsDataNotQuerySyntax(t *testing.T) {
+	e, ctx := newErrorTestEngine(t, `package atol
+import rego.v1
+allow := true
+`)
+	input := errorTestInput
+	input.ResourceType = `document"][0].allow; data.atol`
+
+	result, err := e.Evaluate(ctx, input)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if !result.Allowed {
+		t.Fatalf("allowed = false, want generic allow; trace=%v", result.Trace)
+	}
+}
+
+func TestEvaluate_MalformedStructuredDecisionErrors(t *testing.T) {
+	tests := map[string]string{
+		"missing allow":      `decision := {"reason": "missing"}`,
+		"non-bool allow":     `decision := {"allow": "yes"}`,
+		"non-string reason":  `decision := {"allow": false, "reason": 42}`,
+		"incomplete step-up": `decision := {"allow": false, "step_up": {"method": "passkey"}}`,
+	}
+	for name, rule := range tests {
+		t.Run(name, func(t *testing.T) {
+			e, ctx := newErrorTestEngine(t, "package atol\nimport rego.v1\n"+rule+"\n")
+			result, err := e.Evaluate(ctx, errorTestInput)
+			if !errors.Is(err, ErrInvalidPolicyDecision) {
+				t.Fatalf("Evaluate error = %v, want ErrInvalidPolicyDecision (result=%+v)", err, result)
+			}
+		})
+	}
+}
+
+func TestLoadBundle_RejectsReservedDecisionPackage(t *testing.T) {
+	ms := store.NewMemoryStore()
+	e := New(zanzibar.New(ms, nil, nil))
+	packed, err := packRegoBundle([]byte(`package atol_internal_runtime
+import rego.v1
+decision := {"allow": true}
+`))
+	if err != nil {
+		t.Fatalf("pack bundle: %v", err)
+	}
+	if err := e.LoadBundle(packed, nil); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("LoadBundle error = %v, want reserved-package error", err)
 	}
 }

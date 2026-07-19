@@ -45,7 +45,7 @@ func loadFixture(t *testing.T, name string) []byte {
 }
 
 // newConditionalEngine sets up a zanzibar store with a minimal model +
-// one seed tuple granting user:alice->viewer->document:test-doc and
+// seed tuples granting user:alice viewer/delete on document:test-doc and
 // returns an OPA engine loaded with the given fixture.
 func newConditionalEngine(t *testing.T, fixture string) (*Engine, context.Context) {
 	t.Helper()
@@ -59,6 +59,9 @@ func newConditionalEngine(t *testing.T, fixture string) (*Engine, context.Contex
 	}
 	if err := zEngine.WriteTuple(ctx, "user:alice", "viewer", "document:test-doc"); err != nil {
 		t.Fatalf("write seed tuple: %v", err)
+	}
+	if err := zEngine.WriteTuple(ctx, "user:alice", "delete", "document:test-doc"); err != nil {
+		t.Fatalf("write delete tuple: %v", err)
 	}
 
 	e := New(zEngine)
@@ -116,10 +119,9 @@ func TestConditional_MFA_StepUpRequired_OnSensitiveAction(t *testing.T) {
 	e, ctx := newConditionalEngine(t, "mfa_required.rego")
 
 	r, err := e.Evaluate(ctx, EvalInput{
-		User: "user:alice", Relation: "viewer", Object: "document:test-doc",
+		User: "user:alice", Relation: "delete", Object: "document:test-doc",
 		ResourceType: "document", ResourceID: "test-doc",
 		Extra: map[string]any{
-			"attrs":        map[string]any{"action": "delete"},
 			"mfa_verified": false,
 		},
 	})
@@ -141,10 +143,9 @@ func TestConditional_MFA_AllowsWhenVerified(t *testing.T) {
 	e, ctx := newConditionalEngine(t, "mfa_required.rego")
 
 	r, err := e.Evaluate(ctx, EvalInput{
-		User: "user:alice", Relation: "viewer", Object: "document:test-doc",
+		User: "user:alice", Relation: "delete", Object: "document:test-doc",
 		ResourceType: "document", ResourceID: "test-doc",
 		Extra: map[string]any{
-			"attrs":        map[string]any{"action": "delete"},
 			"mfa_verified": true,
 		},
 	})
@@ -156,6 +157,40 @@ func TestConditional_MFA_AllowsWhenVerified(t *testing.T) {
 	}
 	if r.StepUp != nil {
 		t.Errorf("delete with mfa: StepUp=%+v, want nil", r.StepUp)
+	}
+}
+
+// TestConditional_ExtraCannotSpoofReservedAuthorizationInput proves that
+// caller-supplied policy context cannot replace the verified principal,
+// action, or resource used by policy and Zanzibar. Before this regression
+// guard, maps.Copy applied Extra last and a caller could authorize Mallory by
+// supplying Alice's tuple coordinates in Extra.
+func TestConditional_ExtraCannotSpoofReservedAuthorizationInput(t *testing.T) {
+	e, ctx := newConditionalEngine(t, "mfa_required.rego")
+
+	extra := map[string]any{
+		"user":          "user:alice",
+		"action":        "viewer",
+		"resource":      "document:test-doc",
+		"relation":      "delete",
+		"object":        "document:test-doc",
+		"resource_type": "document",
+		"resource_id":   "test-doc",
+		"mfa_verified":  true,
+	}
+	r, err := e.Evaluate(ctx, EvalInput{
+		User: "user:mallory", Relation: "delete", Object: "document:other-doc",
+		ResourceType: "document", ResourceID: "other-doc",
+		Extra: extra,
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if r.Allowed {
+		t.Errorf("reserved-field spoof: allowed=true, want false. trace=%v", r.Trace)
+	}
+	if extra["user"] != "user:alice" || extra["object"] != "document:test-doc" {
+		t.Errorf("Evaluate mutated caller Extra map: %#v", extra)
 	}
 }
 

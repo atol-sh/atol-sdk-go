@@ -136,8 +136,8 @@ func TestZanzibarCheckBuiltin_IsolatesTenants(t *testing.T) {
 	}
 }
 
-// minimalModelYAML is the smallest model that exercises a `viewer`
-// relation on a `document` type -- enough for the zanzibar.check
+// minimalModelYAML is the smallest model that exercises authorization
+// relations on a `document` type -- enough for the zanzibar.check
 // built-in to compile a real rule path in the auto-generated bundle.
 var minimalModelYAML = []byte(`version: "1.0"
 types:
@@ -145,6 +145,8 @@ types:
   document:
     relations:
       viewer:
+        types: [user]
+      delete:
         types: [user]
 `)
 

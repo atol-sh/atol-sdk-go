@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -93,10 +95,51 @@ func TestFindKey_UnknownKidForcesRefresh(t *testing.T) {
 	}
 }
 
-// TestFindKey_ForcedRefreshRateLimited pins the stampede guard: unknown-kid
-// lookups force at most one real fetch per minForceInterval. A flood of
-// bogus kids must not hammer the JWKS endpoint.
-func TestFindKey_ForcedRefreshRateLimited(t *testing.T) {
+// TestFindKey_DistinctNewKidsWithinRefreshInterval pins the regression where
+// a second valid signing key introduced shortly after the first forced refresh
+// was rejected from the stale cache for the entire rate-limit interval.
+func TestFindKey_DistinctNewKidsWithinRefreshInterval(t *testing.T) {
+	keyA := newTestKey(t)
+	keyB := newTestKey(t)
+	keyC := newTestKey(t)
+
+	js := &jwksServer{}
+	js.set("kid-a", &keyA.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(js.handler))
+	defer srv.Close()
+
+	f := NewJWKSFetcher(srv.URL)
+	f.minForceInterval = 20 * time.Millisecond
+	ctx := context.Background()
+
+	if _, err := f.FindKey(ctx, "kid-a"); err != nil {
+		t.Fatalf("FindKey(kid-a): %v", err)
+	}
+
+	js.set("kid-b", &keyB.PublicKey)
+	if got, err := f.FindKey(ctx, "kid-b"); err != nil {
+		t.Fatalf("FindKey(kid-b): %v", err)
+	} else if len(got) != 1 {
+		t.Fatalf("FindKey(kid-b) returned %d keys, want 1", len(got))
+	}
+
+	// This lookup starts inside the pacing interval. It must wait for the
+	// next allowed refresh and validate kid-c, not return the kid-b snapshot.
+	js.set("kid-c", &keyC.PublicKey)
+	if got, err := f.FindKey(ctx, "kid-c"); err != nil {
+		t.Fatalf("FindKey(kid-c): %v", err)
+	} else if len(got) != 1 || got[0].KeyID != "kid-c" {
+		t.Fatalf("FindKey(kid-c) = %#v, want one kid-c key", got)
+	}
+
+	if got := js.fetches.Load(); got != 3 {
+		t.Fatalf("JWKS fetches = %d, want 3", got)
+	}
+}
+
+// TestFindKey_ForcedRefreshCoalesced pins the stampede guard: concurrent
+// unknown-kid lookups against the same snapshot share one paced refresh.
+func TestFindKey_ForcedRefreshCoalesced(t *testing.T) {
 	keyA := newTestKey(t)
 
 	js := &jwksServer{}
@@ -105,7 +148,7 @@ func TestFindKey_ForcedRefreshRateLimited(t *testing.T) {
 	defer srv.Close()
 
 	f := NewJWKSFetcher(srv.URL)
-	f.minForceInterval = time.Hour // make the rate limit unmissable in-test
+	f.minForceInterval = 20 * time.Millisecond
 	ctx := context.Background()
 
 	// Warm the cache (fetch #1).
@@ -121,17 +164,59 @@ func TestFindKey_ForcedRefreshRateLimited(t *testing.T) {
 	}
 	after := js.fetches.Load()
 
-	// Subsequent unknown kids inside the rate-limit window must be served
-	// from the cached set without another fetch.
+	// Concurrent unknown-kid callers all observe the same snapshot. Exactly
+	// one of them performs the next paced refresh and the rest reuse it.
+	start := make(chan struct{})
+	errs := make(chan error, 10)
+	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
-		if got, err := f.FindKey(ctx, "kid-bogus-2"); err != nil {
-			t.Fatalf("FindKey(kid-bogus-2): %v", err)
-		} else if len(got) != 0 {
-			t.Errorf("FindKey(kid-bogus-2) returned %d keys, want 0", len(got))
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, err := f.FindKey(ctx, "kid-bogus-2")
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(got) != 0 {
+				errs <- fmt.Errorf("FindKey(kid-bogus-2) returned %d keys, want 0", len(got))
+			}
+		}()
 	}
-	if js.fetches.Load() != after {
-		t.Errorf("rate-limited forced refresh fetched %d more times, want 0",
-			js.fetches.Load()-after)
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if got := js.fetches.Load() - after; got != 1 {
+		t.Errorf("coalesced forced refresh fetched %d more times, want 1", got)
+	}
+}
+
+func TestFindKey_RefreshWaitHonorsContext(t *testing.T) {
+	keyA := newTestKey(t)
+
+	js := &jwksServer{}
+	js.set("kid-a", &keyA.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(js.handler))
+	defer srv.Close()
+
+	f := NewJWKSFetcher(srv.URL)
+	f.minForceInterval = time.Hour
+	ctx := context.Background()
+
+	if _, err := f.FindKey(ctx, "kid-a"); err != nil {
+		t.Fatalf("FindKey(kid-a): %v", err)
+	}
+	if _, err := f.FindKey(ctx, "kid-bogus-1"); err != nil {
+		t.Fatalf("FindKey(kid-bogus-1): %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := f.FindKey(canceled, "kid-bogus-2"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindKey with canceled context error = %v, want context.Canceled", err)
 	}
 }

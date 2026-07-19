@@ -1,6 +1,6 @@
-// Package engine provides an embeddable OPA+Zanzibar policy evaluation engine.
-// This is the core of the SDK's authorization stack — imported by both the
-// control plane and the atol-sdk-go.
+// Package engine provides the Go SDK's embeddable OPA+Zanzibar policy
+// evaluation engine. The control plane implements the same public policy
+// decision contract in its independently released engine.
 package engine
 
 import (
@@ -100,6 +100,7 @@ func (bs *bundleState) preparedQuery(ctx context.Context, query string) (*rego.P
 		rego.Compiler(bs.compiler),
 		rego.Store(bs.store),
 		rego.Function3(checkAccessDecl, dispatchCheckAccess),
+		rego.StrictBuiltinErrors(true),
 	)
 	pq, err := r.PrepareForEval(ctx)
 	if err != nil {
@@ -135,10 +136,18 @@ func (e *Engine) LoadBundle(bundleData []byte, policyData map[string]any) error 
 	}
 
 	// Compile modules with zanzibar.check built-in.
-	modules := make(map[string]*ast.Module, len(b.Modules))
+	modules := make(map[string]*ast.Module, len(b.Modules)+1)
 	for _, m := range b.Modules {
+		if m.Parsed.Package.Path.String() == policyDecisionPackage {
+			return fmt.Errorf("compile rego: package %s is reserved", policyDecisionPackage)
+		}
 		modules[m.Path] = m.Parsed
 	}
+	runtimeModule, err := ast.ParseModule(policyDecisionModulePath, policyDecisionModule)
+	if err != nil {
+		return fmt.Errorf("parse policy decision adapter: %w", err)
+	}
+	modules[policyDecisionModulePath] = runtimeModule
 
 	caps := ast.CapabilitiesForThisVersion()
 	caps.Builtins = append(caps.Builtins, zanzibarCheckBuiltin())
@@ -174,7 +183,7 @@ func (e *Engine) snapshot() *bundleState {
 
 // Evaluate runs an OPA+Zanzibar authorization evaluation.
 //
-// Error semantics: an undefined result on every query path means the
+// Error semantics: an undefined canonical decision means the
 // loaded bundle has no opinion -- that falls back to a bare Zanzibar
 // check (designed behavior). An evaluation ERROR (conflict, type error,
 // cancelled context, ...) is surfaced to the caller as an error so it
@@ -198,43 +207,28 @@ func (e *Engine) Evaluate(ctx context.Context, input EvalInput) (*EvalResult, er
 		evalCtx:       ctx,
 	}
 
-	inputMap := map[string]any{
+	inputMap := maps.Clone(input.Extra)
+	if inputMap == nil {
+		inputMap = make(map[string]any)
+	}
+	// Standard authorization fields are authoritative. Extra context may add
+	// policy inputs but must never spoof the principal, action, or resource
+	// used by the Zanzibar check.
+	maps.Copy(inputMap, map[string]any{
 		"user":          input.User,
+		"action":        input.Relation,
+		"resource":      input.Object,
 		"relation":      input.Relation,
 		"object":        input.Object,
 		"resource_type": input.ResourceType,
 		"resource_id":   input.ResourceID,
-	}
-	maps.Copy(inputMap, input.Extra)
+	})
 
-	// Query paths in priority order: resource-type-specific boolean,
-	// generic boolean, resource-type-specific structured decision,
-	// generic structured decision.
-	queryPaths := []string{
-		fmt.Sprintf("data.atol.access.%s.allow", input.ResourceType),
-		"data.atol.allow",
-		fmt.Sprintf("data.atol.access.%s.decision", input.ResourceType),
-		"data.atol.decision",
-	}
-
-	var (
-		evaluatedPaths []string
-		rs             rego.ResultSet
-		matchedRule    string
-	)
-	for _, queryPath := range queryPaths {
-		evaluatedPaths = append(evaluatedPaths, queryPath)
-		var err error
-		rs, err = evalQuery(ctx, bs, state, queryPath, inputMap)
-		if err != nil {
-			// Evaluation error: deny and surface. Never fall back.
-			return nil, fmt.Errorf("opa eval %s (user %s, relation %s, object %s): %w",
-				queryPath, input.User, input.Relation, input.Object, err)
-		}
-		if resultDefined(rs) {
-			matchedRule = queryPath
-			break
-		}
+	rs, err := evalQuery(ctx, bs, state, policyDecisionQuery, inputMap)
+	if err != nil {
+		// Evaluation error: deny and surface. Never fall back.
+		return nil, fmt.Errorf("opa eval %s (user %s, relation %s, object %s): %w",
+			policyDecisionQuery, input.User, input.Relation, input.Object, err)
 	}
 
 	if !resultDefined(rs) {
@@ -243,33 +237,23 @@ func (e *Engine) Evaluate(ctx context.Context, input EvalInput) (*EvalResult, er
 		return e.fallbackCheck(ctx, input)
 	}
 
-	// Try structured decision first, then fall back to bool.
-	if structuredResult, ok := parseStructuredDecision(rs); ok {
-		evalUs, _ := safeconv.SafeInt32From64(time.Since(start).Microseconds())
-		trace := state.getTrace()
-		trace = append(trace, fmt.Sprintf("opa.eval(%s) = structured (%dus)", matchedRule, evalUs))
-		structuredResult.MatchedRule = matchedRule
-		structuredResult.Trace = trace
-		structuredResult.ZanzibarCalls = state.calls.Load()
-		structuredResult.EvalUs = evalUs
-		structuredResult.EvaluatedRulePaths = evaluatedPaths
-		return structuredResult, nil
+	decision, err := decodePolicyDecision(rs)
+	if err != nil {
+		return nil, fmt.Errorf("opa eval %s (user %s, relation %s, object %s): %w",
+			policyDecisionQuery, input.User, input.Relation, input.Object, err)
 	}
 
-	allowed := resultBool(rs)
-	evalUs, _ := safeconv.SafeInt32From64(time.Since(start).Microseconds())
-
+	evalUs, err := safeconv.SafeInt32From64(time.Since(start).Microseconds())
+	if err != nil {
+		return nil, fmt.Errorf("policy evaluation duration: %w", err)
+	}
 	trace := state.getTrace()
-	trace = append(trace, fmt.Sprintf("opa.eval(%s) = %v (%dus)", matchedRule, allowed, evalUs))
-
-	return &EvalResult{
-		Allowed:            allowed,
-		MatchedRule:        matchedRule,
-		Trace:              trace,
-		ZanzibarCalls:      state.calls.Load(),
-		EvalUs:             evalUs,
-		EvaluatedRulePaths: evaluatedPaths,
-	}, nil
+	trace = append(trace, fmt.Sprintf("opa.eval(%s -> %s) = structured allow=%v (%dus)", policyDecisionQuery, decision.MatchedRule, decision.Allowed, evalUs))
+	decision.Trace = trace
+	decision.ZanzibarCalls = state.calls.Load()
+	decision.EvalUs = evalUs
+	decision.EvaluatedRulePaths = []string{policyDecisionQuery}
+	return decision, nil
 }
 
 // evalQuery is a package-level function rather than a method so the
@@ -303,7 +287,10 @@ func (e *Engine) fallbackCheck(ctx context.Context, input EvalInput) (*EvalResul
 		return nil, fmt.Errorf("zanzibar check: %w", err)
 	}
 
-	evalUs, _ := safeconv.SafeInt32From64(time.Since(start).Microseconds())
+	evalUs, err := safeconv.SafeInt32From64(time.Since(start).Microseconds())
+	if err != nil {
+		return nil, fmt.Errorf("zanzibar evaluation duration: %w", err)
+	}
 	return &EvalResult{
 		Allowed:       allowed,
 		MatchedRule:   "zanzibar.check",
@@ -380,40 +367,4 @@ func setNestedData(data map[string]any, path string, value any) {
 
 func resultDefined(rs rego.ResultSet) bool {
 	return len(rs) > 0 && len(rs[0].Expressions) > 0
-}
-
-func resultBool(rs rego.ResultSet) bool {
-	if !resultDefined(rs) {
-		return false
-	}
-	b, ok := rs[0].Expressions[0].Value.(bool)
-	return ok && b
-}
-
-func parseStructuredDecision(rs rego.ResultSet) (*EvalResult, bool) {
-	if !resultDefined(rs) {
-		return nil, false
-	}
-	m, ok := rs[0].Expressions[0].Value.(map[string]any)
-	if !ok {
-		return nil, false
-	}
-
-	allowed, _ := m["allow"].(bool)
-	reason, _ := m["reason"].(string)
-
-	result := &EvalResult{
-		Allowed: allowed,
-		Reason:  reason,
-	}
-
-	if su, ok := m["step_up"].(map[string]any); ok {
-		suType, _ := su["type"].(string)
-		suMethod, _ := su["method"].(string)
-		if suType != "" {
-			result.StepUp = &StepUp{Type: suType, Method: suMethod}
-		}
-	}
-
-	return result, true
 }
