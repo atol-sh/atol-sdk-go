@@ -29,12 +29,13 @@ type modelCache struct {
 
 // Engine is the top-level Zanzibar engine composing model, store, and checker.
 type Engine struct {
-	mu           sync.RWMutex
-	defaultModel *tenantModel
-	cache        modelCache
-	store        store.TupleStore
-	modelStore   store.ModelStore // persistence (nil = no persistence)
-	notifier     zSync.ChangeNotifier
+	mu            sync.RWMutex
+	modelUpdateMu sync.Mutex
+	defaultModel  *tenantModel
+	cache         modelCache
+	store         store.TupleStore
+	modelStore    store.ModelStore // persistence (nil = no persistence)
+	notifier      zSync.ChangeNotifier
 }
 
 // New creates a Zanzibar engine with the given store and optional notifier.
@@ -92,7 +93,8 @@ func (e *Engine) GetModel() *model.Model {
 	return e.defaultModel.model
 }
 
-// LoadModelForTenant compiles YAML, caches it for the tenant, and persists to DB.
+// LoadModelForTenant compiles and durably commits a tenant model before making
+// it visible to authorization reads and update subscribers.
 func (e *Engine) LoadModelForTenant(ctx context.Context, tenantID string, data []byte) error {
 	m, err := model.Compile(data)
 	if err != nil {
@@ -105,16 +107,22 @@ func (e *Engine) LoadModelForTenant(ctx context.Context, tenantID string, data [
 		sourceYAML: data,
 	}
 
-	e.cache.mu.Lock()
-	e.cache.models[tenantID] = tm
-	e.cache.mu.Unlock()
+	// Serialize persistence, activation, and notification so concurrent model
+	// writes cannot leave the durable store and live cache with different
+	// winners. Authorization reads continue using the previous committed model
+	// while persistence is in progress.
+	e.modelUpdateMu.Lock()
+	defer e.modelUpdateMu.Unlock()
 
-	// Persist to DB if model store is available.
 	if e.modelStore != nil {
 		if err := e.modelStore.Save(ctx, tenantID, string(data), "api"); err != nil {
 			return fmt.Errorf("persist model: %w", err)
 		}
 	}
+
+	e.cache.mu.Lock()
+	e.cache.models[tenantID] = tm
+	e.cache.mu.Unlock()
 
 	e.notifier.OnModelUpdate(ctx, tenantID, m)
 	return nil
