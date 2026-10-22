@@ -32,6 +32,9 @@ type modelCommitStore struct {
 	entered   chan string
 	blockYAML string
 	release   <-chan struct{}
+	listOnce  sync.Once
+	listReady chan struct{}
+	listBlock <-chan struct{}
 }
 
 func newModelCommitStore() *modelCommitStore {
@@ -71,10 +74,16 @@ func (s *modelCommitStore) Get(_ context.Context, tenantID string) (store.Stored
 
 func (s *modelCommitStore) ListAll(context.Context) (map[string]store.StoredModel, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	models := make(map[string]store.StoredModel, len(s.persisted))
 	for tenantID, source := range s.persisted {
 		models[tenantID] = source
+	}
+	s.mu.Unlock()
+	if s.listReady != nil {
+		s.listOnce.Do(func() { close(s.listReady) })
+	}
+	if s.listBlock != nil {
+		<-s.listBlock
 	}
 	return models, nil
 }
@@ -330,5 +339,45 @@ func TestActivateModelDropsStaleAndDuplicateRevisions(t *testing.T) {
 	}
 	if got := engine.ModelRevision(); got != 2 {
 		t.Fatalf("active revision = %d, want 2", got)
+	}
+}
+
+func TestLoadPersistedModelsDoesNotRegressConcurrentActivation(t *testing.T) {
+	modelStore := newModelCommitStore()
+	modelStore.persisted["tenant-a"] = store.StoredModel{YAML: modelCommitAYAML, Revision: 1}
+	modelStore.listReady = make(chan struct{})
+	release := make(chan struct{})
+	modelStore.listBlock = release
+	engine := New(store.NewMemoryStore(), modelStore, nil)
+
+	loaded := make(chan error, 1)
+	go func() { loaded <- engine.LoadPersistedModels(context.Background()) }()
+	<-modelStore.listReady
+	if err := engine.ActivateModelForTenant(
+		context.Background(), "tenant-a", []byte(modelCommitBYAML), 2,
+	); err != nil {
+		t.Fatalf("activate concurrent revision: %v", err)
+	}
+	close(release)
+	if err := <-loaded; err != nil {
+		t.Fatalf("LoadPersistedModels: %v", err)
+	}
+
+	snapshot := engine.ModelSnapshotForTenant(context.Background(), "tenant-a")
+	if snapshot.Revision != 2 || string(snapshot.YAML) != modelCommitBYAML {
+		t.Fatalf("snapshot = (%d, %q), want concurrent revision 2", snapshot.Revision, snapshot.YAML)
+	}
+}
+
+func TestLoadPersistedModelsRejectsNonpositiveRevision(t *testing.T) {
+	modelStore := newModelCommitStore()
+	modelStore.persisted["tenant-a"] = store.StoredModel{YAML: modelCommitAYAML, Revision: 0}
+	engine := New(store.NewMemoryStore(), modelStore, nil)
+
+	if err := engine.LoadPersistedModels(context.Background()); err == nil {
+		t.Fatal("LoadPersistedModels accepted revision zero")
+	}
+	if snapshot := engine.ModelSnapshotForTenant(context.Background(), "tenant-a"); snapshot.Revision != 0 || len(snapshot.YAML) != 0 {
+		t.Fatalf("invalid persisted model became active: %+v", snapshot)
 	}
 }

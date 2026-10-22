@@ -22,14 +22,6 @@ type tenantModel struct {
 	revision   int64
 }
 
-// ModelSnapshot is an immutable view of one active authorization model.
-// YAML is copied when the snapshot is created so callers cannot mutate the
-// engine's cached source or observe a source/revision pair from two updates.
-type ModelSnapshot struct {
-	YAML     []byte
-	Revision int64
-}
-
 // modelCache is a thread-safe cache of per-tenant models.
 type modelCache struct {
 	mu     sync.RWMutex
@@ -212,99 +204,6 @@ func (e *Engine) GetModelForTenant(ctx context.Context, tenantID string) *model.
 		return nil
 	}
 	return tm.model
-}
-
-// GetModelSourceYAML returns the original YAML source for the tenant's model.
-// Returns nil if no source was stored (e.g., model was set via SetModel).
-func (e *Engine) GetModelSourceYAML(ctx context.Context, tenantID string) []byte {
-	return e.ModelSnapshotForTenant(ctx, tenantID).YAML
-}
-
-// ModelSnapshotForTenant returns the active tenant model source and revision
-// from one cache entry. The returned YAML is a defensive copy.
-func (e *Engine) ModelSnapshotForTenant(ctx context.Context, tenantID string) ModelSnapshot {
-	tm := e.resolveModel(ctx, tenantID)
-	if tm == nil {
-		return ModelSnapshot{}
-	}
-	return ModelSnapshot{
-		YAML:     append([]byte(nil), tm.sourceYAML...),
-		Revision: tm.revision,
-	}
-}
-
-// RefreshModelForTenant reads the tenant's committed model from the
-// authoritative store, applies it through the monotonic activation fence, and
-// returns one immutable active snapshot. When no tenant model is persisted,
-// the current default snapshot is returned.
-func (e *Engine) RefreshModelForTenant(ctx context.Context, tenantID string) (ModelSnapshot, error) {
-	if tenantID == "" {
-		return ModelSnapshot{}, fmt.Errorf("tenant id is required")
-	}
-	if e.modelStore == nil {
-		return ModelSnapshot{}, fmt.Errorf("refresh model: model store is not configured")
-	}
-	stored, err := e.modelStore.Get(ctx, tenantID)
-	if err != nil {
-		return ModelSnapshot{}, fmt.Errorf("refresh model: %w", err)
-	}
-	if stored.YAML == "" && stored.Revision == 0 {
-		return e.ModelSnapshotForTenant(ctx, tenantID), nil
-	}
-	if stored.YAML == "" || stored.Revision <= 0 {
-		return ModelSnapshot{}, fmt.Errorf("refresh model: invalid stored model revision %d", stored.Revision)
-	}
-	if err := e.ActivateModelForTenant(ctx, tenantID, []byte(stored.YAML), stored.Revision); err != nil {
-		return ModelSnapshot{}, fmt.Errorf("refresh model: %w", err)
-	}
-	return e.ModelSnapshotForTenant(ctx, tenantID), nil
-}
-
-// ModelRevision returns the active default model revision.
-func (e *Engine) ModelRevision() int64 {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.defaultModel == nil {
-		return 0
-	}
-	return e.defaultModel.revision
-}
-
-// ModelRevisionForTenant returns the active tenant model revision, or the
-// default model revision when the tenant has no specific model.
-func (e *Engine) ModelRevisionForTenant(ctx context.Context, tenantID string) int64 {
-	return e.ModelSnapshotForTenant(ctx, tenantID).Revision
-}
-
-// LoadPersistedModels loads all persisted per-tenant models from the DB into cache.
-// Called at startup after the default model is loaded.
-func (e *Engine) LoadPersistedModels(ctx context.Context) error {
-	if e.modelStore == nil {
-		return nil
-	}
-
-	models, err := e.modelStore.ListAll(ctx)
-	if err != nil {
-		return fmt.Errorf("list persisted models: %w", err)
-	}
-
-	for tenantID, stored := range models {
-		m, compileErr := model.Compile([]byte(stored.YAML))
-		if compileErr != nil {
-			return fmt.Errorf("compile persisted model for tenant %s: %w", tenantID, compileErr)
-		}
-		tm := &tenantModel{
-			model:      m,
-			checker:    check.New(m, e.store),
-			sourceYAML: []byte(stored.YAML),
-			revision:   stored.Revision,
-		}
-		e.cache.mu.Lock()
-		e.cache.models[tenantID] = tm
-		e.cache.mu.Unlock()
-	}
-
-	return nil
 }
 
 // resolveModel returns the tenant-specific model, or the default.
