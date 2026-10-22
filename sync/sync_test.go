@@ -254,6 +254,7 @@ types:
 				Mutation: &apiv1.StreamMutationsResponse_ModelUpdate{
 					ModelUpdate: &apiv1.ModelUpdate{
 						AuthorizationModel: newModel,
+						Revision:           1,
 					},
 				},
 				ContinuationToken: "tok-model",
@@ -301,6 +302,74 @@ types:
 	}
 	if _, ok := m.Types["project"]; !ok {
 		t.Error("model does not contain 'project' type after update")
+	}
+}
+
+func TestStream_DropsDelayedModelRevision(t *testing.T) {
+	s := store.NewMemoryStore()
+	z := zanzibar.New(s, nil, nil)
+	p := policyengine.New(z)
+
+	newerModel := `
+types:
+  user: {}
+  project: {}
+`
+	staleModel := `
+types:
+  user: {}
+  stale: {}
+`
+	handler := &mockDPAgentHandler{
+		mutations: []*apiv1.StreamMutationsResponse{
+			{
+				Mutation: &apiv1.StreamMutationsResponse_ModelUpdate{
+					ModelUpdate: &apiv1.ModelUpdate{AuthorizationModel: newerModel, Revision: 2},
+				},
+				ContinuationToken: "tok-newer",
+			},
+			{
+				Mutation: &apiv1.StreamMutationsResponse_ModelUpdate{
+					ModelUpdate: &apiv1.ModelUpdate{AuthorizationModel: staleModel, Revision: 1},
+				},
+				ContinuationToken: "tok-stale",
+			},
+		},
+	}
+
+	mux := http.NewServeMux()
+	path, h := apiv1connect.NewDPAgentServiceHandler(handler)
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := atolsync.NewClient(srv.URL, "org-1", "tok-1", srv.Client(), z, p, zap.NewNop())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		c.Run(ctx)
+		close(done)
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for c.ContinuationToken() != "tok-stale" {
+		select {
+		case <-deadline:
+			cancel()
+			<-done
+			t.Fatal("timed out waiting for delayed model update")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	cancel()
+	<-done
+
+	if _, ok := z.GetModel().Types["project"]; !ok {
+		t.Fatal("delayed revision regressed the active model")
+	}
+	if got := z.ModelRevision(); got != 2 {
+		t.Fatalf("active revision = %d, want 2", got)
 	}
 }
 

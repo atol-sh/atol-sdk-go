@@ -27,7 +27,7 @@ var errModelCommit = errors.New("model commit failed")
 
 type modelCommitStore struct {
 	mu        sync.Mutex
-	persisted map[string]string
+	persisted map[string]store.StoredModel
 	saveErr   error
 	entered   chan string
 	blockYAML string
@@ -35,43 +35,44 @@ type modelCommitStore struct {
 }
 
 func newModelCommitStore() *modelCommitStore {
-	return &modelCommitStore{persisted: make(map[string]string)}
+	return &modelCommitStore{persisted: make(map[string]store.StoredModel)}
 }
 
-func (s *modelCommitStore) Save(ctx context.Context, tenantID, modelYAML, _ string) error {
+func (s *modelCommitStore) Save(ctx context.Context, tenantID, modelYAML, _ string) (int64, error) {
 	if s.entered != nil {
 		s.entered <- modelYAML
 	}
 	if modelYAML == s.blockYAML && s.release != nil {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, ctx.Err()
 		case <-s.release:
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.saveErr != nil {
-		return s.saveErr
+		return 0, s.saveErr
 	}
-	s.persisted[tenantID] = modelYAML
-	return nil
+	revision := s.persisted[tenantID].Revision + 1
+	s.persisted[tenantID] = store.StoredModel{YAML: modelYAML, Revision: revision}
+	return revision, nil
 }
 
-func (s *modelCommitStore) Get(_ context.Context, tenantID string) (string, error) {
+func (s *modelCommitStore) Get(_ context.Context, tenantID string) (store.StoredModel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.persisted[tenantID], nil
 }
 
-func (s *modelCommitStore) ListAll(context.Context) (map[string]string, error) {
+func (s *modelCommitStore) ListAll(context.Context) (map[string]store.StoredModel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	models := make(map[string]string, len(s.persisted))
+	models := make(map[string]store.StoredModel, len(s.persisted))
 	for tenantID, source := range s.persisted {
 		models[tenantID] = source
 	}
@@ -146,8 +147,8 @@ func TestLoadModelForTenantFailedCommitLeavesLastCommittedModel(t *testing.T) {
 			if getErr != nil {
 				t.Fatalf("read persisted model: %v", getErr)
 			}
-			if persisted != modelCommitAYAML {
-				t.Fatalf("persisted model = %q, want model A", persisted)
+			if persisted.YAML != modelCommitAYAML {
+				t.Fatalf("persisted model = %q, want model A", persisted.YAML)
 			}
 			if got := notifier.updateCount(); got != 1 {
 				t.Fatalf("model notifications = %d, want 1", got)
@@ -207,10 +208,52 @@ func TestLoadModelForTenantSerializesCommitActivationAndNotification(t *testing.
 		t.Fatalf("read persisted model: %v", err)
 	}
 	active := string(engine.GetModelSourceYAML(context.Background(), tenantID))
-	if active != modelCommitBYAML || persisted != active {
-		t.Fatalf("active/persisted models diverged: active %q persisted %q", active, persisted)
+	if active != modelCommitBYAML || persisted.YAML != active {
+		t.Fatalf("active/persisted models diverged: active %q persisted %q", active, persisted.YAML)
 	}
 	if got := notifier.updateCount(); got != 2 {
 		t.Fatalf("model notifications = %d, want 2", got)
+	}
+}
+
+func TestActivateModelForTenantDropsStaleAndDuplicateRevisions(t *testing.T) {
+	engine := New(store.NewMemoryStore(), nil, nil)
+	ctx := context.Background()
+	const tenantID = "tenant-a"
+
+	if err := engine.ActivateModelForTenant(ctx, tenantID, []byte(modelCommitBYAML), 2); err != nil {
+		t.Fatalf("activate revision 2: %v", err)
+	}
+	for _, revision := range []int64{2, 1} {
+		if err := engine.ActivateModelForTenant(ctx, tenantID, []byte(modelCommitAYAML), revision); err != nil {
+			t.Fatalf("activate revision %d: %v", revision, err)
+		}
+	}
+
+	if got := string(engine.GetModelSourceYAML(ctx, tenantID)); got != modelCommitBYAML {
+		t.Fatalf("active model = %q, want revision 2 model", got)
+	}
+	if got := engine.ModelRevisionForTenant(ctx, tenantID); got != 2 {
+		t.Fatalf("active revision = %d, want 2", got)
+	}
+}
+
+func TestActivateModelDropsStaleAndDuplicateRevisions(t *testing.T) {
+	engine := New(store.NewMemoryStore(), nil, nil)
+
+	if err := engine.ActivateModel([]byte(modelCommitBYAML), 2); err != nil {
+		t.Fatalf("activate revision 2: %v", err)
+	}
+	for _, revision := range []int64{2, 1} {
+		if err := engine.ActivateModel([]byte(modelCommitAYAML), revision); err != nil {
+			t.Fatalf("activate revision %d: %v", revision, err)
+		}
+	}
+
+	if _, ok := engine.GetModel().Types["clinic"]; !ok {
+		t.Fatal("active model regressed from revision 2")
+	}
+	if got := engine.ModelRevision(); got != 2 {
+		t.Fatalf("active revision = %d, want 2", got)
 	}
 }

@@ -19,6 +19,7 @@ type tenantModel struct {
 	model      *model.Model
 	checker    *check.Checker
 	sourceYAML []byte // original YAML source for serialization in bootstrap snapshots
+	revision   int64
 }
 
 // modelCache is a thread-safe cache of per-tenant models.
@@ -72,6 +73,32 @@ func (e *Engine) LoadModel(data []byte) error {
 	return nil
 }
 
+// ActivateModel compiles and activates a default model only when revision is
+// newer than the currently active revision. It does not persist or notify.
+func (e *Engine) ActivateModel(data []byte, revision int64) error {
+	if revision <= 0 {
+		return fmt.Errorf("model revision must be positive")
+	}
+	m, err := model.Compile(data)
+	if err != nil {
+		return fmt.Errorf("compile model: %w", err)
+	}
+	tm := &tenantModel{
+		model:      m,
+		checker:    check.New(m, e.store),
+		sourceYAML: append([]byte(nil), data...),
+		revision:   revision,
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.defaultModel != nil && revision <= e.defaultModel.revision {
+		return nil
+	}
+	e.defaultModel = tm
+	return nil
+}
+
 // SetModel sets a pre-compiled model as the default model.
 func (e *Engine) SetModel(m *model.Model) {
 	e.mu.Lock()
@@ -96,17 +123,6 @@ func (e *Engine) GetModel() *model.Model {
 // LoadModelForTenant compiles and durably commits a tenant model before making
 // it visible to authorization reads and update subscribers.
 func (e *Engine) LoadModelForTenant(ctx context.Context, tenantID string, data []byte) error {
-	m, err := model.Compile(data)
-	if err != nil {
-		return fmt.Errorf("compile model: %w", err)
-	}
-
-	tm := &tenantModel{
-		model:      m,
-		checker:    check.New(m, e.store),
-		sourceYAML: data,
-	}
-
 	// Serialize persistence, activation, and notification so concurrent model
 	// writes cannot leave the durable store and live cache with different
 	// winners. Authorization reads continue using the previous committed model
@@ -114,17 +130,70 @@ func (e *Engine) LoadModelForTenant(ctx context.Context, tenantID string, data [
 	e.modelUpdateMu.Lock()
 	defer e.modelUpdateMu.Unlock()
 
+	revision := e.ModelRevisionForTenant(ctx, tenantID) + 1
 	if e.modelStore != nil {
-		if err := e.modelStore.Save(ctx, tenantID, string(data), "api"); err != nil {
-			return fmt.Errorf("persist model: %w", err)
+		var err error
+		revision, err = e.SaveModelForTenant(ctx, tenantID, data, "api")
+		if err != nil {
+			return err
 		}
+	}
+	if err := e.ActivateModelForTenant(ctx, tenantID, data, revision); err != nil {
+		return err
+	}
+	e.notifier.OnModelUpdate(ctx, tenantID, e.GetModelForTenant(ctx, tenantID))
+	return nil
+}
+
+// SaveModelForTenant validates and persists a tenant model without activating
+// it. The returned revision is allocated atomically by the model store.
+func (e *Engine) SaveModelForTenant(ctx context.Context, tenantID string, data []byte, createdBy string) (int64, error) {
+	if tenantID == "" {
+		return 0, fmt.Errorf("tenant id is required")
+	}
+	if _, err := model.Compile(data); err != nil {
+		return 0, fmt.Errorf("compile model: %w", err)
+	}
+	if e.modelStore == nil {
+		return 0, fmt.Errorf("persist model: model store is not configured")
+	}
+	revision, err := e.modelStore.Save(ctx, tenantID, string(data), createdBy)
+	if err != nil {
+		return 0, fmt.Errorf("persist model: %w", err)
+	}
+	if revision <= 0 {
+		return 0, fmt.Errorf("persist model: invalid revision %d", revision)
+	}
+	return revision, nil
+}
+
+// ActivateModelForTenant compiles and activates a tenant model only when its
+// revision is newer than the current cache entry. It does not persist or
+// notify, so callers can use it safely from a post-commit hook.
+func (e *Engine) ActivateModelForTenant(_ context.Context, tenantID string, data []byte, revision int64) error {
+	if tenantID == "" {
+		return fmt.Errorf("tenant id is required")
+	}
+	if revision <= 0 {
+		return fmt.Errorf("model revision must be positive")
+	}
+	m, err := model.Compile(data)
+	if err != nil {
+		return fmt.Errorf("compile model: %w", err)
+	}
+	tm := &tenantModel{
+		model:      m,
+		checker:    check.New(m, e.store),
+		sourceYAML: append([]byte(nil), data...),
+		revision:   revision,
 	}
 
 	e.cache.mu.Lock()
+	defer e.cache.mu.Unlock()
+	if current := e.cache.models[tenantID]; current != nil && revision <= current.revision {
+		return nil
+	}
 	e.cache.models[tenantID] = tm
-	e.cache.mu.Unlock()
-
-	e.notifier.OnModelUpdate(ctx, tenantID, m)
 	return nil
 }
 
@@ -147,6 +216,26 @@ func (e *Engine) GetModelSourceYAML(ctx context.Context, tenantID string) []byte
 	return tm.sourceYAML
 }
 
+// ModelRevision returns the active default model revision.
+func (e *Engine) ModelRevision() int64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.defaultModel == nil {
+		return 0
+	}
+	return e.defaultModel.revision
+}
+
+// ModelRevisionForTenant returns the active tenant model revision, or the
+// default model revision when the tenant has no specific model.
+func (e *Engine) ModelRevisionForTenant(ctx context.Context, tenantID string) int64 {
+	tm := e.resolveModel(ctx, tenantID)
+	if tm == nil {
+		return 0
+	}
+	return tm.revision
+}
+
 // LoadPersistedModels loads all persisted per-tenant models from the DB into cache.
 // Called at startup after the default model is loaded.
 func (e *Engine) LoadPersistedModels(ctx context.Context) error {
@@ -159,15 +248,16 @@ func (e *Engine) LoadPersistedModels(ctx context.Context) error {
 		return fmt.Errorf("list persisted models: %w", err)
 	}
 
-	for tenantID, yaml := range models {
-		m, compileErr := model.Compile([]byte(yaml))
+	for tenantID, stored := range models {
+		m, compileErr := model.Compile([]byte(stored.YAML))
 		if compileErr != nil {
 			return fmt.Errorf("compile persisted model for tenant %s: %w", tenantID, compileErr)
 		}
 		tm := &tenantModel{
 			model:      m,
 			checker:    check.New(m, e.store),
-			sourceYAML: []byte(yaml),
+			sourceYAML: []byte(stored.YAML),
+			revision:   stored.Revision,
 		}
 		e.cache.mu.Lock()
 		e.cache.models[tenantID] = tm

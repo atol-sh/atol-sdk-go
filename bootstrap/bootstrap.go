@@ -18,6 +18,9 @@ import (
 // Result contains the bootstrap state and continuation token.
 type Result struct {
 	ContinuationToken string
+	// AuthorizationModelRevision is the monotonic revision loaded into the
+	// Zanzibar engine.
+	AuthorizationModelRevision int64
 	// PolicyData is the dynamic policy-data overlay loaded at bootstrap. The
 	// sync client re-applies it on bundle swaps so it is not wiped (ADR 0022).
 	PolicyData map[string]any
@@ -50,8 +53,16 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 
 	// Load authorization model.
 	if snap.AuthorizationModel != "" {
-		if err := zanzibarEngine.LoadModel([]byte(snap.AuthorizationModel)); err != nil {
-			return nil, fmt.Errorf("load authorization model: %w", err)
+		var loadErr error
+		if snap.GetAuthorizationModelRevision() > 0 {
+			loadErr = zanzibarEngine.ActivateModel(
+				[]byte(snap.AuthorizationModel), snap.GetAuthorizationModelRevision(),
+			)
+		} else {
+			loadErr = zanzibarEngine.LoadModel([]byte(snap.AuthorizationModel))
+		}
+		if loadErr != nil {
+			return nil, fmt.Errorf("load authorization model: %w", loadErr)
 		}
 	}
 
@@ -75,7 +86,8 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 	}
 
 	return &Result{
-		ContinuationToken: snap.ContinuationToken,
-		PolicyData:        policyData,
+		ContinuationToken:          snap.ContinuationToken,
+		AuthorizationModelRevision: snap.GetAuthorizationModelRevision(),
+		PolicyData:                 policyData,
 	}, nil
 }

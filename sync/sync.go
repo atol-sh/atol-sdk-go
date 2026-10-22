@@ -318,7 +318,10 @@ func (c *Client) applyMutation(ctx context.Context, msg *apiv1.StreamMutationsRe
 		if m.ModelUpdate == nil || m.ModelUpdate.AuthorizationModel == "" {
 			return nil
 		}
-		return c.zanzibar.LoadModel([]byte(m.ModelUpdate.AuthorizationModel))
+		return c.zanzibar.ActivateModel(
+			[]byte(m.ModelUpdate.AuthorizationModel),
+			m.ModelUpdate.GetRevision(),
+		)
 
 	case *apiv1.StreamMutationsResponse_PolicyBundleUpdate:
 		return c.applyPolicyBundle(m.PolicyBundleUpdate)
