@@ -238,6 +238,81 @@ func TestActivateModelForTenantDropsStaleAndDuplicateRevisions(t *testing.T) {
 	}
 }
 
+func TestModelSnapshotForTenantKeepsSourceAndRevisionAtomic(t *testing.T) {
+	engine := New(store.NewMemoryStore(), nil, nil)
+	ctx := context.Background()
+	const tenantID = "tenant-a"
+	if err := engine.ActivateModelForTenant(ctx, tenantID, []byte(modelCommitAYAML), 1); err != nil {
+		t.Fatalf("activate initial model: %v", err)
+	}
+
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(done)
+		for revision := int64(2); revision <= 1000; revision++ {
+			source := modelCommitAYAML
+			if revision%2 == 0 {
+				source = modelCommitBYAML
+			}
+			if err := engine.ActivateModelForTenant(ctx, tenantID, []byte(source), revision); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	}()
+
+	for {
+		snapshot := engine.ModelSnapshotForTenant(ctx, tenantID)
+		want := modelCommitAYAML
+		if snapshot.Revision%2 == 0 {
+			want = modelCommitBYAML
+		}
+		if string(snapshot.YAML) != want {
+			t.Fatalf("snapshot revision %d has source %q, want %q", snapshot.Revision, snapshot.YAML, want)
+		}
+		select {
+		case <-done:
+			select {
+			case err := <-errCh:
+				t.Fatalf("activate model: %v", err)
+			default:
+			}
+			mutated := engine.ModelSnapshotForTenant(ctx, tenantID)
+			mutated.YAML[0] = 'x'
+			if got := engine.ModelSnapshotForTenant(ctx, tenantID); len(got.YAML) == 0 || got.YAML[0] == 'x' {
+				t.Fatal("snapshot YAML aliases the cached model source")
+			}
+			return
+		default:
+		}
+	}
+}
+
+func TestRefreshModelForTenantConvergesAnotherEngine(t *testing.T) {
+	modelStore := newModelCommitStore()
+	writer := New(store.NewMemoryStore(), modelStore, nil)
+	reader := New(store.NewMemoryStore(), modelStore, nil)
+	ctx := context.Background()
+	const tenantID = "tenant-a"
+
+	revision, err := writer.SaveModelForTenant(ctx, tenantID, []byte(modelCommitBYAML), "writer")
+	if err != nil {
+		t.Fatalf("save model: %v", err)
+	}
+	if err := writer.ActivateModelForTenant(ctx, tenantID, []byte(modelCommitBYAML), revision); err != nil {
+		t.Fatalf("activate writer model: %v", err)
+	}
+
+	snapshot, err := reader.RefreshModelForTenant(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("refresh reader model: %v", err)
+	}
+	if snapshot.Revision != revision || string(snapshot.YAML) != modelCommitBYAML {
+		t.Fatalf("reader snapshot = (%d, %q), want (%d, model B)", snapshot.Revision, snapshot.YAML, revision)
+	}
+}
+
 func TestActivateModelDropsStaleAndDuplicateRevisions(t *testing.T) {
 	engine := New(store.NewMemoryStore(), nil, nil)
 
