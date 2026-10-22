@@ -18,6 +18,8 @@ import (
 // Result contains the bootstrap state and continuation token.
 type Result struct {
 	ContinuationToken string
+	// TenantID is the canonical tenant authorized by the control plane.
+	TenantID string
 	// AuthorizationModelRevision is the monotonic revision loaded into the
 	// Zanzibar engine.
 	AuthorizationModelRevision int64
@@ -50,6 +52,9 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 	}
 
 	snap := resp.Msg
+	if snap.GetTenantId() == "" {
+		return nil, fmt.Errorf("get bootstrap snapshot: canonical tenant ID is empty")
+	}
 
 	// Load authorization model.
 	if snap.AuthorizationModel != "" {
@@ -87,6 +92,7 @@ func Bootstrap(ctx context.Context, controlPlaneURL, orgID string, httpClient *h
 
 	return &Result{
 		ContinuationToken:          snap.ContinuationToken,
+		TenantID:                   snap.GetTenantId(),
 		AuthorizationModelRevision: snap.GetAuthorizationModelRevision(),
 		PolicyData:                 policyData,
 	}, nil

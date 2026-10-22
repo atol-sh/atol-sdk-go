@@ -31,17 +31,19 @@ var ErrAccessDenied = errors.New("access denied")
 // Atol is the main SDK entry point. It embeds all three engines
 // (Zanzibar, OPA, token validator) for in-process authorization.
 type Atol struct {
-	config           Config
-	httpClient       *http.Client
-	zanzibar         *zanzibar.Engine
-	zanzibarStore    *store.MemoryStore
-	policy           *policyengine.Engine
-	validator        *TokenValidator
-	sessionValidator *SessionValidator
-	dpopValidator    *DPoPValidator
-	decisionLogger   *decision.Logger
-	materializers    *materializerRegistry
-	tupleWriter      tupleWriter // strategy for GrantAccess/RevokeAccess persistence
+	config              Config
+	httpClient          *http.Client
+	zanzibar            *zanzibar.Engine
+	zanzibarStore       *store.MemoryStore
+	policy              *policyengine.Engine
+	validator           *TokenValidator
+	sessionValidator    *SessionValidator
+	dpopValidator       *DPoPValidator
+	decisionLogger      *decision.Logger
+	materializers       *materializerRegistry
+	tupleWriter         tupleWriter // strategy for GrantAccess/RevokeAccess persistence
+	servingGate         *atolsync.TenantServingGate
+	servingGateRequired bool
 
 	// syncClient is published from Bootstrap (one goroutine) and read from
 	// request goroutines, so it is an atomic.Pointer (ADR 0018). A nil load
@@ -155,6 +157,9 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	}
 
 	config.defaults()
+	if config.DisableSync && !no.localOnly && config.ControlPlaneURL != "" && config.StoreID != "" {
+		return nil, fmt.Errorf("disable sync is incompatible with tenant serving lease enforcement")
+	}
 
 	// Build an HTTP client that HMAC-signs requests to the control plane.
 	httpClient := http.DefaultClient
@@ -262,21 +267,26 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	}
 
 	a := &Atol{
-		config:           config,
-		httpClient:       httpClient,
-		zanzibar:         zanzibarEngine,
-		zanzibarStore:    zanzibarStore,
-		policy:           policyEngine,
-		validator:        validator,
-		sessionValidator: sessionValidator,
-		dpopValidator:    NewDPoPValidator(dpopOpts...),
-		decisionLogger:   decisionLogger,
-		materializers:    newMaterializerRegistry(zanzibarStore),
-		tupleWriter:      tw,
-		localOnly:        no.localOnly,
-		metrics:          metrics,
-		drift:            driftDetector,
-		logger:           logger,
+		config:              config,
+		httpClient:          httpClient,
+		zanzibar:            zanzibarEngine,
+		zanzibarStore:       zanzibarStore,
+		policy:              policyEngine,
+		validator:           validator,
+		sessionValidator:    sessionValidator,
+		dpopValidator:       NewDPoPValidator(dpopOpts...),
+		decisionLogger:      decisionLogger,
+		materializers:       newMaterializerRegistry(zanzibarStore),
+		tupleWriter:         tw,
+		servingGate:         atolsync.NewTenantServingGate(),
+		servingGateRequired: !no.localOnly && config.ControlPlaneURL != "" && config.StoreID != "",
+		localOnly:           no.localOnly,
+		metrics:             metrics,
+		drift:               driftDetector,
+		logger:              logger,
+	}
+	if a.servingGateRequired {
+		zanzibarEngine.SetTenantServingGate(a.servingGate)
 	}
 
 	// Start the periodic re-bootstrap ticker if configured. It runs on its
@@ -289,65 +299,6 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	}
 
 	return a, nil
-}
-
-// DriftDetector returns the session-device drift detector, or nil when device
-// intelligence is disabled. Middleware uses it to flag replayed tokens.
-func (a *Atol) DriftDetector() *device.DriftDetector {
-	return a.drift
-}
-
-// Close gracefully shuts down the SDK, flushing any remaining decision logs.
-func (a *Atol) Close() {
-	if a.syncCancel != nil {
-		a.syncCancel()
-	}
-	if a.bgCancel != nil {
-		a.bgCancel()
-	}
-	if a.sessionValidator != nil {
-		a.sessionValidator.Stop()
-	}
-	if a.decisionLogger != nil {
-		a.decisionLogger.Stop()
-	}
-}
-
-// Logger returns the structured logger configured via WithLogger.
-// Always non-nil -- defaults to zap.NewNop().
-func (a *Atol) Logger() *zap.Logger {
-	return a.logger
-}
-
-// DeviceConfig returns the device intelligence configuration.
-// Use this when composing the device middleware:
-//
-//	mux.Use(middleware.DeviceMiddleware(engine.DeviceConfig()))
-func (a *Atol) DeviceConfig() device.Config {
-	return a.config.Device
-}
-
-// Validator returns the token validator, or nil if JWKS is not configured.
-func (a *Atol) Validator() *TokenValidator {
-	return a.validator
-}
-
-// SessionValidator returns the session CRL validator, or nil if not configured.
-func (a *Atol) SessionValidator() *SessionValidator {
-	return a.sessionValidator
-}
-
-// DPoPValidator returns the DPoP proof validator. Always non-nil -- the
-// validator itself is cheap, and middleware branches on whether the
-// incoming Authorization header uses the DPoP scheme.
-func (a *Atol) DPoPValidator() *DPoPValidator {
-	return a.dpopValidator
-}
-
-// RequireDPoP reports whether DPoP-bound tokens are mandatory. Middleware
-// consults this to reject plain Bearer when the operator has opted in.
-func (a *Atol) RequireDPoP() bool {
-	return a.config.RequireDPoP
 }
 
 // Authorize checks if the current request (identified by the principal in context)
@@ -535,6 +486,9 @@ func (a *Atol) ZanzibarEngine() *zanzibar.Engine {
 // CheckDebug performs a Zanzibar check and returns a debug string explaining
 // why it passed or failed (model state, tuple presence, etc.).
 func (a *Atol) CheckDebug(ctx context.Context, user, relation, object string) (bool, string, error) {
+	if err := a.requireServingActive(ctx); err != nil {
+		return false, "", err
+	}
 	return a.zanzibar.CheckDebug(ctx, user, relation, object)
 }
 

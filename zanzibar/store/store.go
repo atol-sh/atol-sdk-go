@@ -3,9 +3,152 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
 
 	"atol.sh/sdk-go/zanzibar/model"
 )
+
+const (
+	// MaxTuplePageSize is the largest bounded relationship page a store may
+	// return. Callers must continue with the returned cursor for larger scans.
+	MaxTuplePageSize  = 500
+	maxTupleCursorLen = 4096
+)
+
+var (
+	ErrInvalidTuplePageLimit  = errors.New("tuple page limit must be between 1 and 500")
+	ErrInvalidTuplePageCursor = errors.New("invalid tuple page cursor")
+	ErrTuplePageUnsupported   = errors.New("tuple store does not support bounded tuple pages")
+)
+
+// TuplePageStore is the bounded keyset-scanning capability used for durable
+// maintenance workflows. Results must use TupleLess ordering and cursors must
+// be bound to both the tenant scope and the exact filter.
+type TuplePageStore interface {
+	ReadPage(ctx context.Context, filter model.TupleFilter, cursor string, limit int) ([]model.Tuple, string, error)
+	CursorAfter(ctx context.Context, filter model.TupleFilter, tuple model.Tuple) (string, error)
+}
+
+// TupleSubjectExcludingPageStore supports a bounded scan that omits one exact
+// subject. It lets union scans avoid cross-filter duplicates durably.
+type TupleSubjectExcludingPageStore interface {
+	ReadPageExcludingSubject(ctx context.Context, filter model.TupleFilter, excludedUserType,
+		excludedUserID, cursor string, limit int) ([]model.Tuple, string, error)
+	CursorAfterExcludingSubject(ctx context.Context, filter model.TupleFilter, excludedUserType,
+		excludedUserID string, tuple model.Tuple) (string, error)
+}
+
+// ExcludingSubjectCursorScope binds a cursor to an exact exclusion predicate.
+func ExcludingSubjectCursorScope(tenantScope, userType, userID string) string {
+	return tenantScope + "\x00exclude-subject\x00" + userType + "\x00" + userID
+}
+
+type tuplePageCursor struct {
+	Version int       `json:"v"`
+	Scope   string    `json:"s"`
+	Key     [6]string `json:"k"`
+}
+
+// ValidateTuplePageLimit rejects unbounded or oversized page requests.
+func ValidateTuplePageLimit(limit int) error {
+	if limit < 1 || limit > MaxTuplePageSize {
+		return ErrInvalidTuplePageLimit
+	}
+	return nil
+}
+
+// EncodeTuplePageCursor returns an opaque cursor bound to tenantScope and the
+// exact filter. tenantScope must be the store's resolved tenant identifier.
+func EncodeTuplePageCursor(tenantScope string, filter model.TupleFilter, tuple model.Tuple) (string, error) {
+	if !matchesTupleFilter(tuple, filter) {
+		return "", fmt.Errorf("%w: key does not match filter", ErrInvalidTuplePageCursor)
+	}
+	cursor := tuplePageCursor{
+		Version: 1,
+		Scope:   tuplePageScope(tenantScope, filter),
+		Key: [6]string{
+			tuple.ObjectType,
+			tuple.ObjectID,
+			tuple.Relation,
+			tuple.UserType,
+			tuple.UserID,
+			tuple.UserRelation,
+		},
+	}
+	raw, err := json.Marshal(cursor)
+	if err != nil {
+		return "", fmt.Errorf("encode tuple page cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// DecodeTuplePageCursor validates a cursor's shape, version, tenant scope,
+// exact filter binding, and last key before returning that key.
+func DecodeTuplePageCursor(cursor, tenantScope string, filter model.TupleFilter) (model.Tuple, error) {
+	if cursor == "" || len(cursor) > maxTupleCursorLen {
+		return model.Tuple{}, ErrInvalidTuplePageCursor
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return model.Tuple{}, ErrInvalidTuplePageCursor
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	var decoded tuplePageCursor
+	if err := decoder.Decode(&decoded); err != nil {
+		return model.Tuple{}, ErrInvalidTuplePageCursor
+	}
+	if err := ensureCursorEOF(decoder); err != nil {
+		return model.Tuple{}, err
+	}
+	if decoded.Version != 1 || decoded.Scope != tuplePageScope(tenantScope, filter) {
+		return model.Tuple{}, ErrInvalidTuplePageCursor
+	}
+	tuple := model.Tuple{
+		ObjectType: decoded.Key[0], ObjectID: decoded.Key[1], Relation: decoded.Key[2],
+		UserType: decoded.Key[3], UserID: decoded.Key[4], UserRelation: decoded.Key[5],
+	}
+	if !matchesTupleFilter(tuple, filter) {
+		return model.Tuple{}, ErrInvalidTuplePageCursor
+	}
+	return tuple, nil
+}
+
+func ensureCursorEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return ErrInvalidTuplePageCursor
+	}
+	return nil
+}
+
+func tuplePageScope(tenantScope string, filter model.TupleFilter) string {
+	value := strings.Join([]string{
+		tenantScope, filter.ObjectType, filter.ObjectID, filter.Relation,
+		filter.UserType, filter.UserID, filter.UserRelation,
+	}, "\x00")
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
+}
+
+// TupleLess defines the stable full-key ordering required by TuplePageStore.
+func TupleLess(left, right model.Tuple) bool {
+	leftKey := [...]string{left.ObjectType, left.ObjectID, left.Relation, left.UserType, left.UserID, left.UserRelation}
+	rightKey := [...]string{right.ObjectType, right.ObjectID, right.Relation, right.UserType, right.UserID, right.UserRelation}
+	for i := range leftKey {
+		if leftKey[i] != rightKey[i] {
+			return leftKey[i] < rightKey[i]
+		}
+	}
+	return false
+}
 
 // TupleStore defines the interface for reading and writing relationship tuples.
 type TupleStore interface {

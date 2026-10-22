@@ -3,17 +3,95 @@ package sync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/open-policy-agent/opa/v1/bundle"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "atol.sh/sdk-go/gen/go/atol/api/v1"
 	policyengine "atol.sh/sdk-go/policy/engine"
 	"atol.sh/sdk-go/zanzibar"
 	"atol.sh/sdk-go/zanzibar/store"
 )
+
+func TestApplyMutationTenantRestrictionBeforeCursorAdvance(t *testing.T) {
+	c, _ := newTestClient(t)
+	if err := c.servingGate.BindTenant("org-1"); err != nil {
+		t.Fatalf("BindTenant: %v", err)
+	}
+	c.setContinuationToken("before-restriction")
+
+	msg := &apiv1.StreamMutationsResponse{
+		TenantId: "org-1",
+		Mutation: &apiv1.StreamMutationsResponse_TenantServingStateUpdate{
+			TenantServingStateUpdate: restrictedUpdate(9),
+		},
+		ContinuationToken: "after-restriction",
+	}
+	if err := c.applyMutation(context.Background(), msg, "challenge"); err != nil {
+		t.Fatalf("applyMutation: %v", err)
+	}
+	if err := c.servingGate.RequireActive("org-1"); !errors.Is(err, ErrTenantServingRestricted) {
+		t.Fatalf("RequireActive = %v, want restricted", err)
+	}
+	if got := c.ContinuationToken(); got != "before-restriction" {
+		t.Fatalf("ContinuationToken = %q, want unchanged before stream commits apply", got)
+	}
+}
+
+func TestApplyMutationRejectsCrossTenantServingState(t *testing.T) {
+	c, _ := newTestClient(t)
+	if err := c.servingGate.BindTenant("org-1"); err != nil {
+		t.Fatalf("BindTenant: %v", err)
+	}
+	msg := &apiv1.StreamMutationsResponse{
+		TenantId: "org-2",
+		Mutation: &apiv1.StreamMutationsResponse_TenantServingStateUpdate{
+			TenantServingStateUpdate: restrictedUpdate(9),
+		},
+	}
+	if err := c.applyMutation(context.Background(), msg, "challenge"); !errors.Is(err, ErrTenantServingScopeMismatch) {
+		t.Fatalf("applyMutation = %v, want scope mismatch", err)
+	}
+	if err := c.servingGate.RequireActive("org-1"); errors.Is(err, ErrTenantServingRestricted) {
+		t.Fatalf("cross-tenant update restricted local tenant: %v", err)
+	}
+}
+
+func TestNewClientInstallsGateOnStandaloneAuthorizationEngines(t *testing.T) {
+	c, policy := newUnleasedTestClient(t)
+	if err := policy.LoadBundle(buildBundle(t, `package atol
+default allow := true
+`), nil); err != nil {
+		t.Fatalf("LoadBundle: %v", err)
+	}
+	input := policyengine.EvalInput{User: "user:x", Relation: "read", Object: "thing:1"}
+	if _, err := policy.Evaluate(context.Background(), input); !errors.Is(err, ErrTenantServingLeaseUnavailable) {
+		t.Fatalf("policy before lease error = %v, want lease unavailable", err)
+	}
+	c.servingGate.now = func() time.Time { return time.Unix(100, 0) }
+	active := &apiv1.TenantServingStateUpdate{
+		State:          apiv1.TenantServingState_TENANT_SERVING_STATE_ACTIVE,
+		LeaseExpiresAt: timestamppb.New(time.Unix(120, 0)), ServingChallenge: "challenge",
+	}
+	if err := c.servingGate.Renew("org-1", "challenge", active); err != nil {
+		t.Fatalf("Renew: %v", err)
+	}
+	if result, err := policy.Evaluate(context.Background(), input); err != nil || !result.Allowed {
+		t.Fatalf("policy during lease = %#v, %v, want allow", result, err)
+	}
+	c.servingGate.now = func() time.Time { return time.Unix(121, 0) }
+	if _, err := policy.Evaluate(context.Background(), input); !errors.Is(err, ErrTenantServingLeaseUnavailable) {
+		t.Fatalf("policy after lease error = %v, want lease unavailable", err)
+	}
+	if _, err := c.zanzibar.Check(context.Background(), "user:x", "read", "thing:1"); !errors.Is(err, ErrTenantServingLeaseUnavailable) {
+		t.Fatalf("zanzibar after lease error = %v, want lease unavailable", err)
+	}
+}
 
 // buildBundle packs a single-module OPA bundle from rego source. The module is
 // under package atol so the engine's data.atol.allow query path matches.
@@ -37,6 +115,20 @@ func buildBundle(t *testing.T, rego string) []byte {
 // newTestClient builds a sync Client wired to fresh engines for direct
 // applyMutation testing.
 func newTestClient(t *testing.T) (*Client, *policyengine.Engine) {
+	t.Helper()
+	c, p := newUnleasedTestClient(t)
+	active := &apiv1.TenantServingStateUpdate{
+		State:            apiv1.TenantServingState_TENANT_SERVING_STATE_ACTIVE,
+		LeaseExpiresAt:   timestamppb.New(time.Now().Add(20 * time.Second)),
+		ServingChallenge: "test-challenge",
+	}
+	if err := c.servingGate.Renew("org-1", "test-challenge", active); err != nil {
+		t.Fatalf("renew test serving lease: %v", err)
+	}
+	return c, p
+}
+
+func newUnleasedTestClient(t *testing.T) (*Client, *policyengine.Engine) {
 	t.Helper()
 	s := store.NewMemoryStore()
 	z := zanzibar.New(s, nil, nil)

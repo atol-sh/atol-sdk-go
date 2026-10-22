@@ -48,8 +48,9 @@ type Config struct {
 	// state (model, tuples, bundle, data) and run materializers. Default 10s.
 	BootstrapTimeout time.Duration
 
-	// DisableSync turns off live mutation sync after bootstrap.
-	// The zero value (false) means sync is enabled.
+	// DisableSync turns off live mutation sync after bootstrap. It is invalid
+	// when a production control plane and store are configured because tenant
+	// serving restrictions require a current live lease.
 	DisableSync bool
 
 	// DecisionLogFlushInterval is how often decision logs are flushed. Default 5s.

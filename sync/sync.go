@@ -6,6 +6,9 @@ package sync
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	gosync "sync"
 	"time"
@@ -38,6 +41,7 @@ type Client struct {
 	zanzibar        *zanzibar.Engine
 	policy          *policyengine.Engine
 	rebootstrap     RebootstrapFunc
+	servingGate     *TenantServingGate
 	logger          *zap.Logger
 
 	mu                gosync.Mutex
@@ -88,11 +92,23 @@ func WithRebootstrap(fn RebootstrapFunc) Option {
 	}
 }
 
+// WithTenantServingGate installs the decision gate shared with the SDK's
+// authorization entry points.
+func WithTenantServingGate(gate *TenantServingGate) Option {
+	return func(c *Client) {
+		c.servingGate = gate
+	}
+}
+
 // NewClient creates a sync client that will stream mutations for the given
 // org from the control plane and apply them to the local engines.
 func NewClient(controlPlaneURL, orgID, continuationToken string, httpClient *http.Client, z *zanzibar.Engine, p *policyengine.Engine, logger *zap.Logger, opts ...Option) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
+	}
+	defaultServingGate := NewTenantServingGate()
+	if orgID != "" {
+		_ = defaultServingGate.BindTenant(orgID)
 	}
 	c := &Client{
 		controlPlaneURL:   controlPlaneURL,
@@ -101,6 +117,7 @@ func NewClient(controlPlaneURL, orgID, continuationToken string, httpClient *htt
 		httpClient:        httpClient,
 		zanzibar:          z,
 		policy:            p,
+		servingGate:       defaultServingGate,
 		logger:            logger,
 		lastDataVersion:   make(map[string]int32),
 		lastDataValue:     make(map[string]any),
@@ -108,8 +125,20 @@ func NewClient(controlPlaneURL, orgID, continuationToken string, httpClient *htt
 	for _, o := range opts {
 		o(c)
 	}
+	if c.servingGate == nil {
+		c.servingGate = defaultServingGate
+	}
+	if c.zanzibar != nil {
+		c.zanzibar.SetTenantServingGate(c.servingGate)
+	}
+	if c.policy != nil {
+		c.policy.SetTenantServingGate(c.servingGate)
+	}
 	return c
 }
+
+// ServingGate returns the fail-closed gate updated by this client.
+func (c *Client) ServingGate() *TenantServingGate { return c.servingGate }
 
 // Run starts streaming mutations. It reconnects with exponential backoff
 // on disconnect and blocks until ctx is cancelled. When the control plane
@@ -248,12 +277,17 @@ func (c *Client) onRebootstrap(token string) {
 // required), either at stream open or mid-stream.
 func (c *Client) stream(ctx context.Context) (tokenRefused bool, err error) {
 	token := c.ContinuationToken()
+	challenge, err := newServingChallenge()
+	if err != nil {
+		return false, err
+	}
 
 	client := apiv1connect.NewDPAgentServiceClient(c.httpClient, c.controlPlaneURL)
 
 	stream, err := client.StreamMutations(ctx, connect.NewRequest(&apiv1.StreamMutationsRequest{
 		OrgId:             c.orgID,
 		ContinuationToken: token,
+		ServingChallenge:  challenge,
 	}))
 	if err != nil {
 		return connect.CodeOf(err) == connect.CodeFailedPrecondition, err
@@ -274,7 +308,7 @@ func (c *Client) stream(ctx context.Context) (tokenRefused bool, err error) {
 
 		msg := stream.Msg()
 
-		applyErr := c.applyMutation(ctx, msg)
+		applyErr := c.applyMutation(ctx, msg, challenge)
 		if applyErr != nil {
 			// A genuine apply failure (store-not-initialized, malformed
 			// bundle) must NOT advance the continuation token past an
@@ -298,7 +332,13 @@ func (c *Client) stream(ctx context.Context) (tokenRefused bool, err error) {
 	return false, nil
 }
 
-func (c *Client) applyMutation(ctx context.Context, msg *apiv1.StreamMutationsResponse) error {
+func (c *Client) applyMutation(ctx context.Context, msg *apiv1.StreamMutationsResponse, challenge ...string) error {
+	if msg == nil {
+		return fmt.Errorf("apply mutation: response is nil")
+	}
+	if msg.GetTenantId() != "" && msg.GetTenantId() != c.orgID {
+		return fmt.Errorf("apply mutation for tenant %q: %w", msg.GetTenantId(), ErrTenantServingScopeMismatch)
+	}
 	switch m := msg.Mutation.(type) {
 	case *apiv1.StreamMutationsResponse_TupleWrite:
 		if m.TupleWrite == nil || m.TupleWrite.Tuple == nil {
@@ -328,9 +368,36 @@ func (c *Client) applyMutation(ctx context.Context, msg *apiv1.StreamMutationsRe
 
 	case *apiv1.StreamMutationsResponse_PolicyDataUpdate:
 		return c.applyPolicyData(m.PolicyDataUpdate)
+
+	case *apiv1.StreamMutationsResponse_TenantServingStateUpdate:
+		if msg.GetTenantId() == "" {
+			return fmt.Errorf("apply tenant serving state: tenant ID is empty")
+		}
+		if m.TenantServingStateUpdate == nil {
+			return fmt.Errorf("apply tenant serving state: update is nil")
+		}
+		switch m.TenantServingStateUpdate.GetState() {
+		case apiv1.TenantServingState_TENANT_SERVING_STATE_ACTIVE:
+			if len(challenge) != 1 {
+				return fmt.Errorf("apply tenant serving state: stream challenge unavailable")
+			}
+			return c.servingGate.Renew(msg.GetTenantId(), challenge[0], m.TenantServingStateUpdate)
+		case apiv1.TenantServingState_TENANT_SERVING_STATE_RESTRICTED:
+			return c.servingGate.Restrict(msg.GetTenantId(), m.TenantServingStateUpdate)
+		default:
+			return fmt.Errorf("apply tenant serving state: unspecified state")
+		}
 	}
 
 	return nil
+}
+
+func newServingChallenge() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate serving challenge: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
 // applyPolicyBundle applies a policy bundle update with the ADR 0022 version

@@ -225,6 +225,147 @@ func (s *MemoryStore) Read(_ context.Context, filter model.TupleFilter) ([]model
 	return result, nil
 }
 
+// ReadPage returns one bounded, deterministically ordered page. The memory
+// implementation snapshots under the read lock so each page is internally
+// consistent; callers that require stability across pages must fence writes.
+func (s *MemoryStore) ReadPage(_ context.Context, filter model.TupleFilter, cursor string, limit int) ([]model.Tuple, string, error) {
+	if err := ValidateTuplePageLimit(limit); err != nil {
+		return nil, "", err
+	}
+	var after model.Tuple
+	if cursor != "" {
+		var err error
+		after, err = DecodeTuplePageCursor(cursor, "", filter)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	s.mu.RLock()
+	result := make([]model.Tuple, 0, limit+1)
+	for _, tuples := range s.byObjectRelation {
+		for _, tuple := range tuples {
+			if matchesFilter(tuple, filter) {
+				result = insertBoundedPageTuple(result, tuple, after, cursor != "", limit+1)
+			}
+		}
+	}
+	for _, tuples := range s.materialized {
+		for _, tuple := range tuples {
+			if matchesFilter(tuple, filter) {
+				result = insertBoundedPageTuple(result, tuple, after, cursor != "", limit+1)
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if len(result) == 0 {
+		return []model.Tuple{}, "", nil
+	}
+	if len(result) <= limit {
+		return append([]model.Tuple(nil), result...), "", nil
+	}
+	page := append([]model.Tuple(nil), result[:limit]...)
+	next, err := EncodeTuplePageCursor("", filter, page[len(page)-1])
+	if err != nil {
+		return nil, "", err
+	}
+	return page, next, nil
+}
+
+// CursorAfter returns a filter-bound continuation cursor for tuple.
+func (s *MemoryStore) CursorAfter(_ context.Context, filter model.TupleFilter, tuple model.Tuple) (string, error) {
+	return EncodeTuplePageCursor("", filter, tuple)
+}
+
+func (s *MemoryStore) ReadPageExcludingSubject(
+	_ context.Context,
+	filter model.TupleFilter,
+	excludedUserType, excludedUserID, cursor string,
+	limit int,
+) ([]model.Tuple, string, error) {
+	if err := ValidateTuplePageLimit(limit); err != nil {
+		return nil, "", err
+	}
+	scope := ExcludingSubjectCursorScope("", excludedUserType, excludedUserID)
+	var after model.Tuple
+	if cursor != "" {
+		var err error
+		after, err = DecodeTuplePageCursor(cursor, scope, filter)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	s.mu.RLock()
+	result := make([]model.Tuple, 0, limit+1)
+	for _, tuples := range s.byObjectRelation {
+		for _, tuple := range tuples {
+			if matchesFilter(tuple, filter) &&
+				(tuple.UserType != excludedUserType || tuple.UserID != excludedUserID) {
+				result = insertBoundedPageTuple(result, tuple, after, cursor != "", limit+1)
+			}
+		}
+	}
+	for _, tuples := range s.materialized {
+		for _, tuple := range tuples {
+			if matchesFilter(tuple, filter) &&
+				(tuple.UserType != excludedUserType || tuple.UserID != excludedUserID) {
+				result = insertBoundedPageTuple(result, tuple, after, cursor != "", limit+1)
+			}
+		}
+	}
+	s.mu.RUnlock()
+	if len(result) == 0 {
+		return []model.Tuple{}, "", nil
+	}
+	if len(result) <= limit {
+		return append([]model.Tuple(nil), result...), "", nil
+	}
+	page := append([]model.Tuple(nil), result[:limit]...)
+	next, err := EncodeTuplePageCursor(scope, filter, page[len(page)-1])
+	if err != nil {
+		return nil, "", err
+	}
+	return page, next, nil
+}
+
+// insertBoundedPageTuple retains only the smallest cap tuples after the
+// cursor. Memory use therefore depends on the requested page, not tenant size.
+func insertBoundedPageTuple(
+	page []model.Tuple,
+	tuple, after model.Tuple,
+	hasAfter bool,
+	capacity int,
+) []model.Tuple {
+	if hasAfter && !TupleLess(after, tuple) {
+		return page
+	}
+	position := sort.Search(len(page), func(i int) bool { return !TupleLess(page[i], tuple) })
+	if len(page) == capacity && position == len(page) {
+		return page
+	}
+	page = append(page, model.Tuple{})
+	copy(page[position+1:], page[position:])
+	page[position] = tuple
+	if len(page) > capacity {
+		page = page[:capacity]
+	}
+	return page
+}
+
+func (s *MemoryStore) CursorAfterExcludingSubject(
+	_ context.Context,
+	filter model.TupleFilter,
+	excludedUserType, excludedUserID string,
+	tuple model.Tuple,
+) (string, error) {
+	if tuple.UserType == excludedUserType && tuple.UserID == excludedUserID {
+		return "", ErrInvalidTuplePageCursor
+	}
+	return EncodeTuplePageCursor(
+		ExcludingSubjectCursorScope("", excludedUserType, excludedUserID), filter, tuple,
+	)
+}
+
 func (s *MemoryStore) ReadUsersets(_ context.Context, objectType, objectID, relation string) ([]model.Tuple, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

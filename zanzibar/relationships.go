@@ -90,6 +90,85 @@ func (e *Engine) CanDelete(ctx context.Context, user, relation, object string) e
 	return nil
 }
 
+// CanDeleteBounded is the maintenance-safe equivalent of CanDelete. Every
+// tuple lookup is performed through bounded keyset pages and there is no
+// fallback to TupleStore.Read.
+func (e *Engine) CanDeleteBounded(ctx context.Context, user, relation, object string) error {
+	userType, userID, userRelation := check.ParseUserKey(user)
+	objectType, objectID := check.ParseObjectKey(object)
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
+	minimum := minHolders(tm, objectType, relation)
+	if minimum < 1 || userRelation != "" {
+		return nil
+	}
+	pager, ok := e.store.(store.TuplePageStore)
+	if !ok {
+		return store.ErrTuplePageUnsupported
+	}
+	target := model.Tuple{
+		ObjectType: objectType, ObjectID: objectID, Relation: relation,
+		UserType: userType, UserID: userID,
+	}
+	found, err := boundedTupleExists(ctx, pager, model.TupleFilter{
+		ObjectType: objectType, ObjectID: objectID, Relation: relation,
+		UserType: userType, UserID: userID,
+	}, target)
+	if err != nil {
+		return fmt.Errorf("read tuple %s#%s@%s: %w", object, relation, user, err)
+	}
+	if !found {
+		return nil
+	}
+
+	direct := 0
+	cursor := ""
+	filter := model.TupleFilter{ObjectType: objectType, ObjectID: objectID, Relation: relation}
+	for {
+		tuples, next, readErr := pager.ReadPage(ctx, filter, cursor, store.MaxTuplePageSize)
+		if readErr != nil {
+			return fmt.Errorf("count direct holders for %s#%s: %w", object, relation, readErr)
+		}
+		for _, tuple := range tuples {
+			if tuple.UserRelation == "" {
+				direct++
+				if direct > minimum {
+					return nil
+				}
+			}
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return model.ErrLastHolder
+}
+
+func boundedTupleExists(
+	ctx context.Context,
+	pager store.TuplePageStore,
+	filter model.TupleFilter,
+	target model.Tuple,
+) (bool, error) {
+	cursor := ""
+	for {
+		tuples, next, err := pager.ReadPage(ctx, filter, cursor, store.MaxTuplePageSize)
+		if err != nil {
+			return false, err
+		}
+		if containsDirect(tuples, target) {
+			return true, nil
+		}
+		if next == "" {
+			return false, nil
+		}
+		cursor = next
+	}
+}
+
 // directHolders counts the direct holders (user_relation == "") of
 // (objectType, objectID, relation) in the store.
 func (e *Engine) directHolders(ctx context.Context, objectType, objectID, relation string) (int, error) {

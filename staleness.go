@@ -78,6 +78,9 @@ func (a *Atol) mode() syncMode {
 // staleResult is non-nil only when the gate trips in fail-closed mode, in which
 // case it carries the deny decision and the caller must NOT call policy.Evaluate.
 func (a *Atol) evaluateGated(ctx context.Context, input policyengine.EvalInput) (result *policyengine.EvalResult, staleResult *policyengine.EvalResult, err error) {
+	if err := a.requireServingActive(ctx); err != nil {
+		return nil, nil, err
+	}
 	if stale, since := a.checkStale(); stale {
 		switch a.config.StalenessMode {
 		case StalenessError:

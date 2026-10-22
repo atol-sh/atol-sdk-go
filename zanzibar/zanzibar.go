@@ -37,6 +37,7 @@ type Engine struct {
 	store         store.TupleStore
 	modelStore    store.ModelStore // persistence (nil = no persistence)
 	notifier      zSync.ChangeNotifier
+	servingGate   TenantServingGate
 }
 
 // New creates a Zanzibar engine with the given store and optional notifier.
@@ -231,6 +232,9 @@ func (e *Engine) resolveModel(ctx context.Context, tenantID string) *tenantModel
 // Check returns true if the user has the given relation on the object.
 // user and object are in "type:id" format.
 func (e *Engine) Check(ctx context.Context, user, relation, object string) (bool, error) {
+	if err := e.requireTenantServing(ctx); err != nil {
+		return false, err
+	}
 	tm, err := e.modelForOperation(ctx)
 	if err != nil {
 		return false, err
@@ -249,6 +253,9 @@ func (e *Engine) Check(ctx context.Context, user, relation, object string) (bool
 // object, considering both stored tuples and the provided ephemeral context tuples.
 // Context tuples are never persisted — they exist only for this evaluation.
 func (e *Engine) CheckWithContextTuples(ctx context.Context, user, relation, object string, contextTuples []model.Tuple) (bool, error) {
+	if err := e.requireTenantServing(ctx); err != nil {
+		return false, err
+	}
 	if len(contextTuples) == 0 {
 		return e.Check(ctx, user, relation, object)
 	}
@@ -362,6 +369,9 @@ func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string)
 
 // CheckDebug performs a check and returns detailed debug info about why it passed or failed.
 func (e *Engine) CheckDebug(ctx context.Context, user, relation, object string) (bool, string, error) {
+	if err := e.requireTenantServing(ctx); err != nil {
+		return false, "tenant serving gate denied", err
+	}
 	tm, err := e.modelForOperation(ctx)
 	if err != nil {
 		return false, "authorization model refresh failed", err
@@ -506,6 +516,9 @@ func (e *Engine) ReadTuples(ctx context.Context, filter model.TupleFilter) ([]mo
 
 // ListObjects returns all object IDs of the given type that the user has the relation on.
 func (e *Engine) ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error) {
+	if err := e.requireTenantServing(ctx); err != nil {
+		return nil, err
+	}
 	tm, err := e.modelForOperation(ctx)
 	if err != nil {
 		return nil, err
@@ -520,6 +533,9 @@ func (e *Engine) ListObjects(ctx context.Context, user, relation, objectType str
 
 // ListUsers returns all user keys that have the relation on the object.
 func (e *Engine) ListUsers(ctx context.Context, relation, object string) ([]string, error) {
+	if err := e.requireTenantServing(ctx); err != nil {
+		return nil, err
+	}
 	tm, err := e.modelForOperation(ctx)
 	if err != nil {
 		return nil, err

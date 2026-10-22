@@ -21,6 +21,7 @@ import (
 	"atol.sh/sdk-go/internal/safeconv"
 	"atol.sh/sdk-go/zanzibar"
 	"atol.sh/sdk-go/zanzibar/model"
+	zstore "atol.sh/sdk-go/zanzibar/store"
 )
 
 // EvalInput holds the input for an authorization evaluation.
@@ -65,10 +66,25 @@ type StepUp struct {
 // evaluate). The mu guards the *bundleState pointer so a reader always
 // sees a consistent snapshot -- never half-installed bundle state.
 type Engine struct {
-	zanzibar *zanzibar.Engine
+	zanzibar    *zanzibar.Engine
+	servingGate TenantServingGate
 
 	mu     sync.RWMutex
 	bundle *bundleState
+}
+
+// TenantServingGate denies policy decisions unless the tenant has a current
+// authoritative active lease. It is deliberately shared with Zanzibar so an
+// OPA-only allow cannot bypass tenant serving state.
+type TenantServingGate interface {
+	RequireActive(tenantID string) error
+}
+
+// SetTenantServingGate installs the fail-closed serving gate.
+func (e *Engine) SetTenantServingGate(gate TenantServingGate) {
+	e.mu.Lock()
+	e.servingGate = gate
+	e.mu.Unlock()
 }
 
 // bundleState is one immutable bundle generation: the compiled modules,
@@ -189,6 +205,14 @@ func (e *Engine) snapshot() *bundleState {
 // cancelled context, ...) is surfaced to the caller as an error so it
 // can deny and report -- it never silently degrades to the fallback.
 func (e *Engine) Evaluate(ctx context.Context, input EvalInput) (*EvalResult, error) {
+	e.mu.RLock()
+	servingGate := e.servingGate
+	e.mu.RUnlock()
+	if servingGate != nil {
+		if err := servingGate.RequireActive(zstore.TenantFromContext(ctx)); err != nil {
+			return nil, fmt.Errorf("tenant policy serving is unavailable: %w", err)
+		}
+	}
 	// Pin a consistent bundle snapshot up front so we're immune to a
 	// concurrent LoadBundle swapping half-way through.
 	bs := e.snapshot()

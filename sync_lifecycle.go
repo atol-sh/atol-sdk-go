@@ -100,20 +100,24 @@ func (a *Atol) Bootstrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := a.servingGate.BindTenant(result.TenantID); err != nil {
+		return fmt.Errorf("bind bootstrap tenant: %w", err)
+	}
 
 	a.markBootstrapped()
 
 	// Start live sync to receive real-time mutations from the control plane.
-	if !a.config.DisableSync && result != nil && result.ContinuationToken != "" {
+	if !a.config.DisableSync {
 		client := atolsync.NewClient(
 			a.config.ControlPlaneURL,
-			a.config.StoreID,
+			result.TenantID,
 			result.ContinuationToken,
 			a.httpClient,
 			a.zanzibar,
 			a.policy,
 			a.logger.Named("sync"),
 			atolsync.WithRebootstrap(a.rebootstrap),
+			atolsync.WithTenantServingGate(a.servingGate),
 		)
 		// Seed the bootstrap dynamic-data overlay so a later bundle swap does
 		// not wipe it (ADR 0022). Must precede Run.
@@ -159,6 +163,9 @@ func (a *Atol) rebootstrap(ctx context.Context) (string, error) {
 	result, err := a.bootstrapLoad(ctx)
 	if err != nil {
 		return "", fmt.Errorf("rebootstrap: %w", err)
+	}
+	if err := a.servingGate.BindTenant(result.TenantID); err != nil {
+		return "", fmt.Errorf("bind rebootstrap tenant: %w", err)
 	}
 	a.markBootstrapped()
 	// Refresh the sync client's bootstrap overlay so post-rebootstrap bundle
