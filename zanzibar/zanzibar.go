@@ -231,7 +231,10 @@ func (e *Engine) resolveModel(ctx context.Context, tenantID string) *tenantModel
 // Check returns true if the user has the given relation on the object.
 // user and object are in "type:id" format.
 func (e *Engine) Check(ctx context.Context, user, relation, object string) (bool, error) {
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return false, err
+	}
 	if tm == nil || tm.checker == nil {
 		return false, fmt.Errorf("no model loaded")
 	}
@@ -250,7 +253,10 @@ func (e *Engine) CheckWithContextTuples(ctx context.Context, user, relation, obj
 		return e.Check(ctx, user, relation, object)
 	}
 
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return false, err
+	}
 	if tm == nil || tm.checker == nil {
 		return false, fmt.Errorf("no model loaded")
 	}
@@ -277,7 +283,10 @@ func (e *Engine) WriteTuple(ctx context.Context, user, relation, object string) 
 	}
 
 	// Validate against the resolved model.
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
 	if tm != nil && tm.model != nil {
 		if err := model.ValidateTuple(tm.model, t); err != nil {
 			return err
@@ -315,7 +324,11 @@ func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string)
 		UserRelation: userRelation,
 	}
 
-	min := e.minHolders(ctx, objectType, relation)
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
+	min := minHolders(tm, objectType, relation)
 	if min >= 1 && t.UserRelation == "" {
 		deleter, ok := e.store.(store.ConditionalDeleter)
 		if !ok {
@@ -349,7 +362,10 @@ func (e *Engine) DeleteTuple(ctx context.Context, user, relation, object string)
 
 // CheckDebug performs a check and returns detailed debug info about why it passed or failed.
 func (e *Engine) CheckDebug(ctx context.Context, user, relation, object string) (bool, string, error) {
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return false, "authorization model refresh failed", err
+	}
 	if tm == nil {
 		return false, "no model loaded (defaultModel is nil)", nil
 	}
@@ -490,7 +506,10 @@ func (e *Engine) ReadTuples(ctx context.Context, filter model.TupleFilter) ([]mo
 
 // ListObjects returns all object IDs of the given type that the user has the relation on.
 func (e *Engine) ListObjects(ctx context.Context, user, relation, objectType string) ([]string, error) {
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if tm == nil || tm.checker == nil {
 		return nil, fmt.Errorf("no model loaded")
 	}
@@ -501,7 +520,10 @@ func (e *Engine) ListObjects(ctx context.Context, user, relation, objectType str
 
 // ListUsers returns all user keys that have the relation on the object.
 func (e *Engine) ListUsers(ctx context.Context, relation, object string) ([]string, error) {
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if tm == nil || tm.checker == nil {
 		return nil, fmt.Errorf("no model loaded")
 	}

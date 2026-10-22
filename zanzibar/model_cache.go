@@ -3,6 +3,9 @@ package zanzibar
 import (
 	"context"
 	"fmt"
+
+	"atol.sh/sdk-go/zanzibar/model"
+	"atol.sh/sdk-go/zanzibar/store"
 )
 
 // ModelSnapshot is an immutable view of one active authorization model.
@@ -57,6 +60,31 @@ func (e *Engine) RefreshModelForTenant(ctx context.Context, tenantID string) (Mo
 		return ModelSnapshot{}, fmt.Errorf("refresh model: %w", err)
 	}
 	return e.ModelSnapshotForTenant(ctx, tenantID), nil
+}
+
+// RefreshModelForContext returns the active compiled model after reconciling
+// the current tenant with the authoritative model store. Embedded engines
+// without a model store, and contexts without a tenant, keep using the active
+// in-memory model without performing I/O.
+func (e *Engine) RefreshModelForContext(ctx context.Context) (*model.Model, error) {
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tm == nil {
+		return nil, nil
+	}
+	return tm.model, nil
+}
+
+func (e *Engine) modelForOperation(ctx context.Context) (*tenantModel, error) {
+	tenantID := store.TenantFromContext(ctx)
+	if tenantID != "" && e.modelStore != nil {
+		if _, err := e.RefreshModelForTenant(ctx, tenantID); err != nil {
+			return nil, fmt.Errorf("refresh authorization model: %w", err)
+		}
+	}
+	return e.resolveModel(ctx, ""), nil
 }
 
 // ModelRevision returns the active default model revision.

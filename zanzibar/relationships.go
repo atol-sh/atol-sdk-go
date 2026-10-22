@@ -20,9 +20,8 @@ var ErrNotTransactional = errors.New("store does not support transactional write
 var ErrNotReplaceable = errors.New("store does not support transactional relationship replacement")
 
 // minHolders returns the declared minimum-holder floor for (objectType,
-// relation) under the resolved model, or 0 if there is no floor (or no model).
-func (e *Engine) minHolders(ctx context.Context, objectType, relation string) int {
-	tm := e.resolveModel(ctx, "")
+// relation) under the supplied model, or 0 if there is no floor (or no model).
+func minHolders(tm *tenantModel, objectType, relation string) int {
 	if tm == nil || tm.model == nil {
 		return 0
 	}
@@ -47,7 +46,11 @@ func (e *Engine) CanDelete(ctx context.Context, user, relation, object string) e
 	userType, userID, userRelation := check.ParseUserKey(user)
 	objectType, objectID := check.ParseObjectKey(object)
 
-	min := e.minHolders(ctx, objectType, relation)
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
+	min := minHolders(tm, objectType, relation)
 	if min < 1 || userRelation != "" {
 		return nil
 	}
@@ -138,7 +141,10 @@ func (e *Engine) WriteRelationships(ctx context.Context, writes, deletes []model
 	}
 
 	// Validate every write against the resolved model before mutating anything.
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
 	if tm != nil && tm.model != nil {
 		for _, t := range writes {
 			if err := model.ValidateTuple(tm.model, t); err != nil {
@@ -187,7 +193,10 @@ func (e *Engine) ReplaceRelationships(ctx context.Context, filter model.TupleFil
 		return fmt.Errorf("replace relationships requires object_type, object_id, and relation")
 	}
 
-	tm := e.resolveModel(ctx, "")
+	tm, err := e.modelForOperation(ctx)
+	if err != nil {
+		return err
+	}
 	for _, tuple := range replacements {
 		if !tupleMatchesFilter(tuple, filter) {
 			return fmt.Errorf("replacement tuple %s#%s@%s does not match filter", tuple.ObjectKey(), tuple.Relation, tuple.UserKey())
