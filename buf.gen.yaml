@@ -1,9 +1,11 @@
 version: v2
+clean: true
 # Generated stubs are sourced from the canonical proto contract published at
 # buf.build/atol-sh/atol-protos (repo: github.com/atol-sh/atol-protos).
-# Run `buf generate` to refresh ./gen from the latest published module.
+# BSR commit 7b0d2f975d6c451e8654d720c4a88274 is the verified v0.2.0 label.
+# Run `buf generate` to refresh ./gen from that immutable commit.
 inputs:
-  - module: buf.build/atol-sh/atol-protos
+  - module: buf.build/atol-sh/atol-protos:7b0d2f975d6c451e8654d720c4a88274
 # Override go_package back to this SDK's module so import paths and the
 # committed gen/ tree stay stable. Applies to the single atol.api.v1 package.
 managed:

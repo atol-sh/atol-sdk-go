@@ -30,15 +30,15 @@ jobs:
 
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...
 
-      - name: License audit (Apache 2.0 / MIT / BSD only)
+      - name: License audit (approved permissive licenses only)
         run: |
-          go install github.com/google/go-licenses@latest
-          # Fail on copyleft. The list matches atol/.github/workflows/ci.yml.
+          go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses check ./... \
-            --disallowed_types=forbidden,restricted
+            --ignore=atol.sh/sdk-go \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,BSD-2-Clause-FreeBSD,BSD-2-Clause-Views,ISC,Unicode-3.0,CDLA-Permissive-2.0,Zlib
 
   proto:
     name: Proto stubs in sync with BSR

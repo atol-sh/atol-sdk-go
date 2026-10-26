@@ -55,29 +55,31 @@ const (
 
 // DPAgentServiceClient is a client for the atol.api.v1.DPAgentService service.
 type DPAgentServiceClient interface {
-	// GetBootstrapSnapshot returns everything an agent needs to initialize:
-	// the authorization model, all tuples, the active OPA policy bundle,
-	// policy data, and a continuation token for incremental updates.
+	// GetBootstrapSnapshot returns everything an agent needs to initialize: the
+	// authorization model, all tuples, the active OPA policy bundle, policy data,
+	// and a continuation token for incremental updates via StreamMutations.
 	GetBootstrapSnapshot(context.Context, *connect.Request[v1.GetBootstrapSnapshotRequest]) (*connect.Response[v1.GetBootstrapSnapshotResponse], error)
-	// IngestDecisionLogs accepts a stream of decision logs from the agent
+	// IngestDecisionLogs accepts a client stream of decision logs from the agent
 	// and persists them for audit and analytics.
 	IngestDecisionLogs(context.Context) *connect.ClientStreamForClient[v1.IngestDecisionLogsRequest, v1.IngestDecisionLogsResponse]
-	// StreamMutations opens a server-streaming connection that pushes
-	// real-time tuple, model, and policy mutations to embedded SDK agents.
+	// StreamMutations opens a server stream that pushes real-time mutations
+	// (tuple writes/deletes, model updates, policy updates) to connected SDK
+	// instances after bootstrap, keeping their in-memory state current.
 	StreamMutations(context.Context, *connect.Request[v1.StreamMutationsRequest]) (*connect.ServerStreamForClient[v1.StreamMutationsResponse], error)
 	// GetSessionDeviceSnapshot returns the device bound to a session (keyed by
-	// the token's jti) so the SDK can compare live per-request server-side
-	// signals against it locally, without a round trip per request.
+	// the token's `jti`) so the SDK can compare live, per-request, server-side
+	// signals against it locally, without a round trip on every request.
 	GetSessionDeviceSnapshot(context.Context, *connect.Request[v1.GetSessionDeviceSnapshotRequest]) (*connect.Response[v1.GetSessionDeviceSnapshotResponse], error)
-	// ReportDeviceDivergence accepts a low-volume stream of divergence events:
-	// a token presented with server-side signals (JA4 / UA / IP) that differ
-	// from the session's bound device, or with no client fingerprint at all.
-	// Each becomes a session.device_mismatch timeline event and, for an unknown
-	// client, a server-signal device profile.
+	// ReportDeviceDivergence accepts a low-volume client stream of divergence
+	// events: a token presented with server-side signals (JA4 / user-agent / IP)
+	// that differ from the session's bound device, or with no client fingerprint
+	// at all. Each becomes a `session.device_mismatch` timeline event and, for an
+	// unknown client, a server-signal device profile.
 	ReportDeviceDivergence(context.Context) *connect.ClientStreamForClient[v1.ReportDeviceDivergenceRequest, v1.ReportDeviceDivergenceResponse]
 	// ListRevokedSessions returns the session revocation list (CRL) for an
 	// organization. Embedded SDKs poll this to maintain the in-memory deny
-	// list that rejects revoked-but-unexpired session tokens.
+	// list that rejects revoked-but-unexpired session tokens (the token's
+	// `jti` claim is the session id).
 	ListRevokedSessions(context.Context, *connect.Request[v1.ListRevokedSessionsRequest]) (*connect.Response[v1.ListRevokedSessionsResponse], error)
 }
 
@@ -173,29 +175,31 @@ func (c *dPAgentServiceClient) ListRevokedSessions(ctx context.Context, req *con
 
 // DPAgentServiceHandler is an implementation of the atol.api.v1.DPAgentService service.
 type DPAgentServiceHandler interface {
-	// GetBootstrapSnapshot returns everything an agent needs to initialize:
-	// the authorization model, all tuples, the active OPA policy bundle,
-	// policy data, and a continuation token for incremental updates.
+	// GetBootstrapSnapshot returns everything an agent needs to initialize: the
+	// authorization model, all tuples, the active OPA policy bundle, policy data,
+	// and a continuation token for incremental updates via StreamMutations.
 	GetBootstrapSnapshot(context.Context, *connect.Request[v1.GetBootstrapSnapshotRequest]) (*connect.Response[v1.GetBootstrapSnapshotResponse], error)
-	// IngestDecisionLogs accepts a stream of decision logs from the agent
+	// IngestDecisionLogs accepts a client stream of decision logs from the agent
 	// and persists them for audit and analytics.
 	IngestDecisionLogs(context.Context, *connect.ClientStream[v1.IngestDecisionLogsRequest]) (*connect.Response[v1.IngestDecisionLogsResponse], error)
-	// StreamMutations opens a server-streaming connection that pushes
-	// real-time tuple, model, and policy mutations to embedded SDK agents.
+	// StreamMutations opens a server stream that pushes real-time mutations
+	// (tuple writes/deletes, model updates, policy updates) to connected SDK
+	// instances after bootstrap, keeping their in-memory state current.
 	StreamMutations(context.Context, *connect.Request[v1.StreamMutationsRequest], *connect.ServerStream[v1.StreamMutationsResponse]) error
 	// GetSessionDeviceSnapshot returns the device bound to a session (keyed by
-	// the token's jti) so the SDK can compare live per-request server-side
-	// signals against it locally, without a round trip per request.
+	// the token's `jti`) so the SDK can compare live, per-request, server-side
+	// signals against it locally, without a round trip on every request.
 	GetSessionDeviceSnapshot(context.Context, *connect.Request[v1.GetSessionDeviceSnapshotRequest]) (*connect.Response[v1.GetSessionDeviceSnapshotResponse], error)
-	// ReportDeviceDivergence accepts a low-volume stream of divergence events:
-	// a token presented with server-side signals (JA4 / UA / IP) that differ
-	// from the session's bound device, or with no client fingerprint at all.
-	// Each becomes a session.device_mismatch timeline event and, for an unknown
-	// client, a server-signal device profile.
+	// ReportDeviceDivergence accepts a low-volume client stream of divergence
+	// events: a token presented with server-side signals (JA4 / user-agent / IP)
+	// that differ from the session's bound device, or with no client fingerprint
+	// at all. Each becomes a `session.device_mismatch` timeline event and, for an
+	// unknown client, a server-signal device profile.
 	ReportDeviceDivergence(context.Context, *connect.ClientStream[v1.ReportDeviceDivergenceRequest]) (*connect.Response[v1.ReportDeviceDivergenceResponse], error)
 	// ListRevokedSessions returns the session revocation list (CRL) for an
 	// organization. Embedded SDKs poll this to maintain the in-memory deny
-	// list that rejects revoked-but-unexpired session tokens.
+	// list that rejects revoked-but-unexpired session tokens (the token's
+	// `jti` claim is the session id).
 	ListRevokedSessions(context.Context, *connect.Request[v1.ListRevokedSessionsRequest]) (*connect.Response[v1.ListRevokedSessionsResponse], error)
 }
 
