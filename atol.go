@@ -187,7 +187,11 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 
 	var validator *TokenValidator
 	if config.JWKSUrl != "" {
-		validator = NewTokenValidator(config.JWKSUrl, config.Issuer, config.Audience)
+		var validatorOptions []ValidatorOption
+		if config.AllowTestTokens {
+			validatorOptions = append(validatorOptions, WithAllowTestTokens())
+		}
+		validator = NewTokenValidator(config.JWKSUrl, config.Issuer, config.Audience, validatorOptions...)
 	}
 
 	// Initialize decision logger if control plane is configured.

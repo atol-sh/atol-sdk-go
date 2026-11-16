@@ -24,12 +24,17 @@ const tokenValidationLeeway = 30 * time.Second
 // be substituted by an ID token (typ "JWT" or absent).
 var ErrTokenTypeMismatch = errors.New("token typ header does not match required value")
 
+// ErrTestTokenRejected is returned when a test-user token reaches a validator
+// that has not explicitly enabled test-token acceptance.
+var ErrTestTokenRejected = errors.New("test-user token rejected")
+
 // TokenValidator validates Atol-issued JWTs and extracts claims.
 type TokenValidator struct {
-	jwks         *atolidentity.JWKSFetcher
-	issuer       string
-	audience     string // optional: when set, JWT aud must contain this value
-	requiredType string // optional: when set, JWT header typ must equal this value
+	jwks            *atolidentity.JWKSFetcher
+	issuer          string
+	audience        string // optional: when set, JWT aud must contain this value
+	requiredType    string // optional: when set, JWT header typ must equal this value
+	allowTestTokens bool
 }
 
 // ValidatorOption configures a TokenValidator.
@@ -42,6 +47,14 @@ type ValidatorOption func(*TokenValidator)
 func WithRequiredTokenType(typ string) ValidatorOption {
 	return func(v *TokenValidator) {
 		v.requiredType = typ
+	}
+}
+
+// WithAllowTestTokens enables tokens issued by the test-user grant. Only use it
+// for isolated test resources with an expected test issuer and audience.
+func WithAllowTestTokens() ValidatorOption {
+	return func(v *TokenValidator) {
+		v.allowTestTokens = true
 	}
 }
 
@@ -113,6 +126,10 @@ func (v *TokenValidator) ValidateToken(ctx context.Context, rawToken string) (*P
 	}
 	if err := standard.ValidateWithLeeway(expected, tokenValidationLeeway); err != nil {
 		return nil, nil, nil, "", fmt.Errorf("validate claims: %w", err)
+	}
+	if (custom.TestUser || custom.AuthMethod == "test") &&
+		(!v.allowTestTokens || v.issuer == "" || v.audience == "") {
+		return nil, nil, nil, "", ErrTestTokenRejected
 	}
 
 	// Populate principal with all available claims.

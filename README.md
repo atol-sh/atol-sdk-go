@@ -253,6 +253,57 @@ fmt.Println(p.Plan)       // "pro"
 fmt.Println(p.AuthMethod) // "oidc"
 ```
 
+### Service user management and test-user tokens
+
+A backend with a tenant-scoped API key can call `MachineUserService`. Give the
+key only the user scopes it needs. Keep the same issuing API key, idempotency
+key, and input when retrying creation after an uncertain response. Use the
+tenant's assigned regional API host. This example needs `users:create`,
+`users:read`, and `users:invite`:
+
+```go
+users, err := sdk.NewMachineUserClient(sdk.Config{
+    ControlPlaneURL: "https://api.us-1.atol.sh",
+    StoreID: "tenant-id",
+    KeyID: keyID,
+    SecretKey: secretKey,
+}, nil)
+if err != nil { return err }
+user, err := users.CreateUser(ctx, sdk.CreateMachineUserInput{
+    Email: "player@example.com", DisplayName: "Player",
+    IdempotencyKey: stableOperationID,
+})
+if err != nil { return err }
+_, err = users.StartInvitation(ctx, user.ID, stableInvitationID)
+```
+
+For an active, email-verified user with a password,
+`StartPasswordReset(ctx, userID, stableResetID)` queues a one-use email and
+returns delivery status without a link token. It requires the separate
+`users:reset-initiate` and `users:read` key scopes. Completion revokes
+sessions and deletes wrapped application data encryption keys. Retry an
+uncertain response with the same issuing API key and idempotency key.
+
+An isolated test tenant can use a separate confidential OIDC client to mint an
+access-only token for an existing test-marked user. Atol staff create the
+immutable test tenant, and a platform administrator designates the test user;
+a customer administrator cannot mark a user as test. The test client needs
+the exact test-user grant, explicit audience, and allowed scopes:
+
+```go
+minter, err := sdk.NewTestUserTokenClient(
+    "https://test-tenant.atol.sh", clientID, clientSecret, nil,
+)
+if err != nil { return err }
+token, err := minter.Token(ctx, testUserID, "https://test-api.example.com", []string{"profile"})
+```
+
+Token validation rejects test-user tokens by default. A test-only resource
+server can opt in with `sdk.WithAllowTestTokens()` and must configure the exact
+test issuer and audience. Production resource servers should configure their
+production issuer and audience and leave test-token acceptance disabled. These
+client APIs require the corresponding control-plane service release.
+
 ## Authorization
 
 ### Check permissions
