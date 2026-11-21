@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "atol.sh/sdk-go"
 )
@@ -69,7 +70,12 @@ func TestMachineUserClientCallsScopedService(t *testing.T) {
 			_, _ = w.Write([]byte(`{"user":{"id":"user-1","orgId":"tenant-1","email":"a@example.com"}}`))
 		case "ListUsers":
 			_, _ = w.Write([]byte(`{"users":[{"id":"user-1","orgId":"tenant-1"}],"page":{"nextPageToken":"next","totalCount":1}}`))
+		case "ListRevokedSessions":
+			_, _ = w.Write([]byte(`{"revokedSessionIds":["session-1"],"asOf":"2026-11-21T21:00:00Z"}`))
 		case "StartInvitation":
+			if request["clientId"] != "client-1" {
+				t.Errorf("invitation client ID = %v, want client-1", request["clientId"])
+			}
 			_, _ = w.Write([]byte(`{"userId":"user-1","deliveryState":"pending","expiresAt":"2026-11-17T00:00:00Z"}`))
 		case "StartPasswordReset":
 			if request["idempotencyKey"] != "reset-key-1234567" || request["userId"] != "user-1" {
@@ -102,6 +108,10 @@ func TestMachineUserClientCallsScopedService(t *testing.T) {
 	if err != nil || len(page.Users) != 1 || page.NextPageToken != "next" {
 		t.Fatalf("list users = %+v, %v", page, err)
 	}
+	revocations, err := client.ListRevokedSessions(ctx)
+	if err != nil || len(revocations.RevokedSessionIDs) != 1 || revocations.RevokedSessionIDs[0] != "session-1" || revocations.AsOf.IsZero() {
+		t.Fatalf("list revoked sessions = %+v, %v", revocations, err)
+	}
 	if _, err := client.UpdateDisplayName(ctx, "user-1", "Alice"); err != nil {
 		t.Fatalf("update display name: %v", err)
 	}
@@ -111,7 +121,7 @@ func TestMachineUserClientCallsScopedService(t *testing.T) {
 	if err := client.ReactivateUser(ctx, "user-1"); err != nil {
 		t.Fatalf("reactivate user: %v", err)
 	}
-	invitation, err := client.StartInvitation(ctx, "user-1", "invite-key-123456")
+	invitation, err := client.StartInvitation(ctx, "user-1", "client-1", "invite-key-123456")
 	if err != nil || invitation.DeliveryState != "pending" {
 		t.Fatalf("start invitation = %+v, %v", invitation, err)
 	}
@@ -119,8 +129,58 @@ func TestMachineUserClientCallsScopedService(t *testing.T) {
 	if err != nil || reset.DeliveryState != "pending" || reset.ExpiresAt.IsZero() {
 		t.Fatalf("start password reset = %+v, %v", reset, err)
 	}
-	if got := strings.Join(methods, ","); got != "CreateUser,CreateUser,GetUser,ListUsers,UpdateDisplayName,DeactivateUser,ReactivateUser,StartInvitation,StartPasswordReset" {
+	if got := strings.Join(methods, ","); got != "CreateUser,CreateUser,GetUser,ListUsers,ListRevokedSessions,UpdateDisplayName,DeactivateUser,ReactivateUser,StartInvitation,StartPasswordReset" {
 		t.Errorf("methods = %q", got)
+	}
+}
+
+func TestMachineUserClientListsUsersUpdatedSince(t *testing.T) {
+	t.Parallel()
+	since := time.Date(2026, time.November, 21, 10, 30, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/atol.api.v1.MachineUserService/ListUsers" {
+			t.Errorf("path = %q, want ListUsers", r.URL.Path)
+		}
+		var request struct {
+			OrgID        string `json:"orgId"`
+			UpdatedSince string `json:"updatedSince"`
+			Page         struct {
+				PageSize int32 `json:"pageSize"`
+			} `json:"page"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode list request: %v", err)
+		}
+		if request.OrgID != "tenant-1" || request.UpdatedSince != since.Format(time.RFC3339Nano) || request.Page.PageSize != 500 {
+			t.Errorf("list request = %+v, want tenant, timestamp and 500-row page", request)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"users":[{"id":"user-1","orgId":"tenant-1","status":"deactivated","emailVerified":true}],"page":{"totalCount":1}}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := sdk.NewMachineUserClient(sdk.Config{ControlPlaneURL: server.URL, StoreID: "tenant-1", KeyID: "key-1", SecretKey: "secret-1"}, nil)
+	if err != nil {
+		t.Fatalf("new machine user client: %v", err)
+	}
+	page, err := client.ListUsersSince(context.Background(), since, 500, "")
+	if err != nil || len(page.Users) != 1 || page.Users[0].Status != "deactivated" || !page.Users[0].EmailVerified {
+		t.Fatalf("list since = %+v, %v, want verified deactivated user", page, err)
+	}
+}
+
+func TestMachineUserClientRejectsIncompleteRevocationSnapshot(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"revokedSessionIds":["session-1"]}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := sdk.NewMachineUserClient(sdk.Config{ControlPlaneURL: server.URL, StoreID: "tenant-1", KeyID: "key-1", SecretKey: "secret-1"}, nil)
+	if err != nil {
+		t.Fatalf("new machine user client: %v", err)
+	}
+	if snapshot, err := client.ListRevokedSessions(context.Background()); err == nil || snapshot != nil {
+		t.Fatalf("incomplete snapshot = %+v, %v, want refusal", snapshot, err)
 	}
 }
 

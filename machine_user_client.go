@@ -23,13 +23,14 @@ type MachineUserClient struct {
 
 // MachineUser is the narrow user projection returned by MachineUserService.
 type MachineUser struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"displayName"`
-	Email       string    `json:"email"`
-	Status      string    `json:"status"`
-	OrgID       string    `json:"orgId"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID            string    `json:"id"`
+	DisplayName   string    `json:"displayName"`
+	Email         string    `json:"email"`
+	Status        string    `json:"status"`
+	EmailVerified bool      `json:"emailVerified"`
+	OrgID         string    `json:"orgId"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // CreateMachineUserInput requires a caller-stable idempotency key. Reuse it on
@@ -50,6 +51,13 @@ type MachineInvitation struct {
 	UserID        string    `json:"userId"`
 	DeliveryState string    `json:"deliveryState"`
 	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+// MachineRevocations is a complete bounded snapshot of revoked session IDs.
+// Treat a stale AsOf or a failed refresh as unavailable authorization state.
+type MachineRevocations struct {
+	RevokedSessionIDs []string  `json:"revokedSessionIds"`
+	AsOf              time.Time `json:"asOf"`
 }
 
 // MachinePasswordReset is the delivery status of a hosted one-use reset link.
@@ -127,8 +135,22 @@ func (c *MachineUserClient) GetUser(ctx context.Context, userID string) (*Machin
 }
 
 func (c *MachineUserClient) ListUsers(ctx context.Context, pageSize int32, pageToken string) (*MachineUserPage, error) {
-	if pageSize < 0 || pageSize > 100 {
-		return nil, errors.New("page size must be between 0 and 100")
+	return c.listUsers(ctx, pageSize, pageToken, "")
+}
+
+// ListUsersSince lists users changed on or after updatedSince. Use the returned
+// cursor for every page, then periodically run a full walk to catch deletions
+// and transactions that committed after an incremental scan.
+func (c *MachineUserClient) ListUsersSince(ctx context.Context, updatedSince time.Time, pageSize int32, pageToken string) (*MachineUserPage, error) {
+	if updatedSince.IsZero() {
+		return nil, errors.New("updated since is required")
+	}
+	return c.listUsers(ctx, pageSize, pageToken, updatedSince.UTC().Format(time.RFC3339Nano))
+}
+
+func (c *MachineUserClient) listUsers(ctx context.Context, pageSize int32, pageToken, updatedSince string) (*MachineUserPage, error) {
+	if pageSize < 0 || pageSize > 500 {
+		return nil, errors.New("page size must be between 0 and 500")
 	}
 	var response struct {
 		Users []MachineUser `json:"users"`
@@ -138,12 +160,13 @@ func (c *MachineUserClient) ListUsers(ctx context.Context, pageSize int32, pageT
 		} `json:"page"`
 	}
 	if err := c.call(ctx, "ListUsers", struct {
-		OrgID string `json:"orgId"`
-		Page  struct {
+		OrgID        string `json:"orgId"`
+		UpdatedSince string `json:"updatedSince,omitempty"`
+		Page         struct {
 			PageSize  int32  `json:"pageSize"`
 			PageToken string `json:"pageToken"`
 		} `json:"page"`
-	}{OrgID: c.orgID, Page: struct {
+	}{OrgID: c.orgID, UpdatedSince: updatedSince, Page: struct {
 		PageSize  int32  `json:"pageSize"`
 		PageToken string `json:"pageToken"`
 	}{pageSize, pageToken}}, &response); err != nil {
@@ -155,6 +178,27 @@ func (c *MachineUserClient) ListUsers(ctx context.Context, pageSize int32, pageT
 		}
 	}
 	return &MachineUserPage{Users: response.Users, NextPageToken: response.Page.NextPageToken, TotalCount: response.Page.TotalCount}, nil
+}
+
+// ListRevokedSessions fetches the tenant's complete revocation snapshot using
+// a key with sessions:revocations:read. Atol returns an error instead of a
+// partial snapshot when the bounded response limit is exceeded.
+func (c *MachineUserClient) ListRevokedSessions(ctx context.Context) (*MachineRevocations, error) {
+	var response MachineRevocations
+	if err := c.call(ctx, "ListRevokedSessions", struct {
+		OrgID string `json:"orgId"`
+	}{c.orgID}, &response); err != nil {
+		return nil, err
+	}
+	if response.AsOf.IsZero() || len(response.RevokedSessionIDs) > 10_000 {
+		return nil, errors.New("Atol returned an invalid revocation snapshot")
+	}
+	for _, id := range response.RevokedSessionIDs {
+		if id == "" {
+			return nil, errors.New("Atol returned an invalid revocation snapshot")
+		}
+	}
+	return &response, nil
 }
 
 func (c *MachineUserClient) UpdateDisplayName(ctx context.Context, userID, displayName string) (*MachineUser, error) {
@@ -201,16 +245,19 @@ func (c *MachineUserClient) ReactivateUser(ctx context.Context, userID string) e
 	}{c.orgID, userID}, &response)
 }
 
-func (c *MachineUserClient) StartInvitation(ctx context.Context, userID, idempotencyKey string) (*MachineInvitation, error) {
-	if userID == "" || len(idempotencyKey) < 16 || len(idempotencyKey) > 128 {
-		return nil, errors.New("invitation requires user ID and a 16-128 character idempotency key")
+// StartInvitation queues hosted enrollment for a user and registered OIDC
+// client. The client's login-start URI receives the browser after enrollment.
+func (c *MachineUserClient) StartInvitation(ctx context.Context, userID, clientID, idempotencyKey string) (*MachineInvitation, error) {
+	if userID == "" || clientID == "" || len(idempotencyKey) < 16 || len(idempotencyKey) > 128 {
+		return nil, errors.New("invitation requires user ID, client ID and a 16-128 character idempotency key")
 	}
 	var response MachineInvitation
 	if err := c.call(ctx, "StartInvitation", struct {
 		OrgID          string `json:"orgId"`
 		UserID         string `json:"userId"`
+		ClientID       string `json:"clientId"`
 		IdempotencyKey string `json:"idempotencyKey"`
-	}{c.orgID, userID, idempotencyKey}, &response); err != nil {
+	}{c.orgID, userID, clientID, idempotencyKey}, &response); err != nil {
 		return nil, err
 	}
 	if response.UserID != userID || response.DeliveryState == "" {

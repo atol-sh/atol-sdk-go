@@ -274,7 +274,7 @@ user, err := users.CreateUser(ctx, sdk.CreateMachineUserInput{
     IdempotencyKey: stableOperationID,
 })
 if err != nil { return err }
-_, err = users.StartInvitation(ctx, user.ID, stableInvitationID)
+_, err = users.StartInvitation(ctx, user.ID, oidcClientID, stableInvitationID)
 ```
 
 For an active, email-verified user with a password,
@@ -283,6 +283,12 @@ returns delivery status without a link token. It requires the separate
 `users:reset-initiate` and `users:read` key scopes. Completion revokes
 sessions and deletes wrapped application data encryption keys. Retry an
 uncertain response with the same issuing API key and idempotency key.
+
+`ListUsersSince(ctx, updatedSince, pageSize, pageToken)` returns current users
+including `EmailVerified`; use an overlapping time window and periodic full
+walk because this is not a commit-ordered change feed. A key with
+`sessions:revocations:read` can call `ListRevokedSessions(ctx)` and must refuse
+tokens when the returned `AsOf` becomes stale or a refresh fails.
 
 An isolated test tenant can use a separate confidential OIDC client to mint an
 access-only token for an existing test-marked user. Atol staff create the
