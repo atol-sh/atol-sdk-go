@@ -60,7 +60,9 @@ type MachinePasswordReset struct {
 }
 
 // NewMachineUserClient creates a service client without changing the caller's
-// HTTP client. A nil HTTP client uses a 15-second timeout and default transport.
+// HTTP client. Config.StoreID must be the canonical tenant ID, not its slug,
+// because the service returns canonical IDs for user records. A nil HTTP client
+// uses a 15-second timeout and default transport.
 func NewMachineUserClient(config Config, httpClient *http.Client) (*MachineUserClient, error) {
 	baseURL, err := serviceBaseURL(config.ControlPlaneURL)
 	if err != nil {

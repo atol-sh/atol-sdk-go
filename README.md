@@ -264,7 +264,7 @@ tenant's assigned regional API host. This example needs `users:create`,
 ```go
 users, err := sdk.NewMachineUserClient(sdk.Config{
     ControlPlaneURL: "https://api.us-1.atol.sh",
-    StoreID: "tenant-id",
+    StoreID: "tenant-id", // Canonical tenant ID from Settings > General, not its slug.
     KeyID: keyID,
     SecretKey: secretKey,
 }, nil)
