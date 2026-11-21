@@ -130,6 +130,7 @@ func (f *TokenFactory) MintToken(opts ...TokenOption) string {
 		Plan:           cfg.plan,
 		Roles:          cfg.roles,
 		AuthMethod:     cfg.authMethod,
+		TestUser:       cfg.testUser,
 		MFAVerified:    cfg.mfaVerified,
 		TrustDomain:    cfg.trustDomain,
 		IdentityID:     cfg.identityID,
@@ -174,6 +175,7 @@ type tokenConfig struct {
 	roles          []string
 	plan           string
 	authMethod     string
+	testUser       bool
 	mfaVerified    bool
 	emailVerified  bool
 	identityID     string
@@ -194,6 +196,7 @@ type atolClaims struct {
 	Plan           string    `json:"atol:plan,omitempty"`
 	Roles          []string  `json:"atol:roles,omitempty"`
 	AuthMethod     string    `json:"atol:auth_method,omitempty"`
+	TestUser       bool      `json:"atol:test_user,omitempty"`
 	MFAVerified    bool      `json:"atol:mfa_verified,omitempty"`
 	TrustDomain    string    `json:"atol:trust_domain,omitempty"`
 	AuthTime       int64     `json:"atol:auth_time,omitempty"`
@@ -238,6 +241,11 @@ func WithPlan(plan string) TokenOption {
 // WithAuthMethod sets the atol:auth_method custom claim.
 func WithAuthMethod(method string) TokenOption {
 	return func(c *tokenConfig) { c.authMethod = method }
+}
+
+// WithTestUser marks the token as issued for an isolated test user.
+func WithTestUser() TokenOption {
+	return func(c *tokenConfig) { c.testUser = true }
 }
 
 // WithMFA sets atol:mfa_verified to true.

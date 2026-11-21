@@ -17,6 +17,9 @@ type AtolClaims struct {
 	// AuthMethod used for this session (password, passkey, social, magic_link).
 	AuthMethod string `json:"atol:auth_method,omitempty"`
 
+	// TestUser marks a token issued by the isolated test-user grant.
+	TestUser bool `json:"atol:test_user,omitempty"`
+
 	// MFAVerified indicates whether multi-factor auth was completed.
 	MFAVerified bool `json:"atol:mfa_verified,omitempty"`
 
