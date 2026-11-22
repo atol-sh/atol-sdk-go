@@ -58,6 +58,11 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 				http.Error(w, "session rejected", http.StatusUnauthorized)
 				return
 			}
+			if claims != nil && (claims.TestUser || claims.AuthMethod == "test") &&
+				isStreamingRPCContentType(r.Header.Get("Content-Type")) {
+				http.Error(w, "test-user tokens cannot open streams", http.StatusUnauthorized)
+				return
+			}
 
 			// Session-device drift: flag a token presented from a client whose
 			// live signals diverge from the device bound to the session (e.g. a
@@ -145,4 +150,15 @@ func extractClientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// isStreamingRPCContentType detects framed RPC transports before a handler can
+// open a long-lived stream. gRPC and gRPC-web use the same content type for
+// unary and streaming calls, so test tokens are denied for both shapes here.
+func isStreamingRPCContentType(contentType string) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	return strings.HasPrefix(mediaType, "application/connect+") ||
+		mediaType == "application/grpc" || strings.HasPrefix(mediaType, "application/grpc+") ||
+		mediaType == "application/grpc-web" || strings.HasPrefix(mediaType, "application/grpc-web+") ||
+		mediaType == "application/grpc-web-text" || strings.HasPrefix(mediaType, "application/grpc-web-text+")
 }

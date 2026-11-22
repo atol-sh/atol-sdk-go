@@ -29,6 +29,7 @@ type testTokenCRLHandler struct {
 type streamDPAgentHandler struct {
 	apiv1connect.UnimplementedDPAgentServiceHandler
 	onStream func(context.Context)
+	onUnary  func(context.Context)
 }
 
 func (h *streamDPAgentHandler) StreamMutations(
@@ -37,6 +38,15 @@ func (h *streamDPAgentHandler) StreamMutations(
 ) error {
 	h.onStream(ctx)
 	return nil
+}
+
+func (h *streamDPAgentHandler) GetBootstrapSnapshot(
+	ctx context.Context, _ *connect.Request[apiv1.GetBootstrapSnapshotRequest],
+) (*connect.Response[apiv1.GetBootstrapSnapshotResponse], error) {
+	if h.onUnary != nil {
+		h.onUnary(ctx)
+	}
+	return connect.NewResponse(&apiv1.GetBootstrapSnapshotResponse{}), nil
 }
 
 type testGRPCServerStream struct {
@@ -130,6 +140,68 @@ func TestStreamInterceptorsRejectMissingAndInvalidTokens(t *testing.T) {
 			assertConnectStreamTokenSession(t, engine, token, false)
 			assertGRPCStreamTokenSession(t, engine, token, false)
 		})
+	}
+}
+
+func TestHTTPMiddlewareDeniesTestTokenFramedStreamsWithoutInterceptor(t *testing.T) {
+	factory := atoltest.NewTokenFactory(t)
+	crlMux := http.NewServeMux()
+	crlMux.Handle(apiv1connect.NewDPAgentServiceHandler(&testTokenCRLHandler{}))
+	crlServer := httptest.NewServer(crlMux)
+	t.Cleanup(crlServer.Close)
+	engine, err := sdk.New(sdk.Config{
+		StoreID: "tenant-a", Issuer: factory.Issuer(), JWKSUrl: factory.JWKSUrl(),
+		Audience: "game", AllowTestTokens: true, ControlPlaneURL: crlServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("sdk.New: %v", err)
+	}
+	t.Cleanup(engine.Close)
+	token := factory.MintToken(
+		atoltest.WithOrgID("tenant-a"), atoltest.WithAudience("game"),
+		atoltest.WithJTI("session-a"), atoltest.WithTestUser(), atoltest.WithAuthMethod("test"),
+	)
+	streamCalled := false
+	unaryCalled := false
+	path, endpoint := apiv1connect.NewDPAgentServiceHandler(&streamDPAgentHandler{
+		onStream: func(context.Context) { streamCalled = true },
+		onUnary:  func(context.Context) { unaryCalled = true },
+	})
+	mux := http.NewServeMux()
+	mux.Handle(path, HTTPMiddleware(engine)(endpoint))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	for _, contentType := range []string{
+		"application/connect+proto", "application/connect+json; charset=utf-8",
+		"application/grpc", "application/grpc+proto", "application/grpc-web+proto",
+		"application/grpc-web-text+proto",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost,
+				server.URL+apiv1connect.DPAgentServiceStreamMutationsProcedure, nil)
+			if err != nil {
+				t.Fatalf("http.NewRequest: %v", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", contentType)
+			resp, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatalf("stream request: %v", err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized || streamCalled {
+				t.Errorf("status/handler = %d/%v, want 401/false", resp.StatusCode, streamCalled)
+			}
+		})
+	}
+	client := apiv1connect.NewDPAgentServiceClient(server.Client(), server.URL)
+	unary := connect.NewRequest(&apiv1.GetBootstrapSnapshotRequest{OrgId: "tenant-a"})
+	unary.Header().Set("Authorization", "Bearer "+token)
+	if _, err := client.GetBootstrapSnapshot(context.Background(), unary); err != nil {
+		t.Fatalf("unary Connect request: %v", err)
+	}
+	if !unaryCalled {
+		t.Error("unary Connect handler was not called")
 	}
 }
 

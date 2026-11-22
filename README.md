@@ -319,9 +319,13 @@ should use direct `NewTokenValidator` with `WithAllowTestTokens()` and
 each request boundary. Production resource servers should leave test-token
 acceptance disabled. Built-in Connect and gRPC streaming handlers reject
 test-user tokens because a stream could outlive the token or revocation
-snapshot. Plain HTTP handlers that upgrade or keep connections open must
-enforce token renewal or close those connections themselves. These client
-APIs require the corresponding control-plane service release.
+snapshot. HTTPMiddleware also denies test tokens on framed Connect streaming,
+gRPC and gRPC-web transports when used without an RPC interceptor. Because
+gRPC framing does not identify unary calls, this also denies test-token gRPC
+unary calls under HTTPMiddleware. Plain HTTP handlers that upgrade or keep
+connections open must enforce token renewal or close those connections
+themselves. These client APIs require the corresponding control-plane service
+release.
 
 ## Authorization
 
