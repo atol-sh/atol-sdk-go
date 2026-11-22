@@ -54,10 +54,19 @@ type MachineInvitation struct {
 }
 
 // MachineRevocations is a complete bounded snapshot of revoked session IDs.
-// Treat a stale AsOf or a failed refresh as unavailable authorization state.
+// Treat a stale or future AsOf or a failed refresh as unavailable authorization state.
 type MachineRevocations struct {
 	RevokedSessionIDs []string  `json:"revokedSessionIds"`
 	AsOf              time.Time `json:"asOf"`
+}
+
+// FreshAt reports whether the snapshot is no older than maxAge at now.
+// Future timestamps are invalid so clock skew cannot extend the freshness window.
+func (r *MachineRevocations) FreshAt(now time.Time, maxAge time.Duration) bool {
+	if r == nil || r.AsOf.IsZero() || now.IsZero() || maxAge <= 0 {
+		return false
+	}
+	return !r.AsOf.After(now) && !r.AsOf.Before(now.Add(-maxAge))
 }
 
 // MachinePasswordReset is the delivery status of a hosted one-use reset link.
