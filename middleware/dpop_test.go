@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"atol.sh/sdk-go"
+	"atol.sh/sdk-go/atoltest"
 )
 
 // TestExtractAuthToken_Schemes verifies the Authorization-header parser
@@ -94,6 +95,69 @@ func TestHTTPMiddleware_RequireDPoP(t *testing.T) {
 	// The RequireDPoP branch must emit an RFC 9449 challenge, not a bare 401.
 	if wa := w.Header().Get("WWW-Authenticate"); !strings.HasPrefix(wa, "DPoP ") {
 		t.Errorf("WWW-Authenticate = %q, want DPoP challenge", wa)
+	}
+}
+
+func TestHTTPMiddleware_DPoPRequiresTokenKeyBinding(t *testing.T) {
+	factory := atoltest.NewTokenFactory(t)
+	prover, err := atoltest.NewDPoPProver()
+	if err != nil {
+		t.Fatalf("NewDPoPProver: %v", err)
+	}
+	const url = "https://api.example.com/rpc"
+	for _, tc := range []struct {
+		name        string
+		bound       bool
+		requireDPoP bool
+		omitATH     bool
+		wantAccept  bool
+	}{
+		{"unbound DPoP scheme", false, false, false, false},
+		{"unbound required DPoP", false, true, false, false},
+		{"bound proof missing ath", true, true, true, false},
+		{"matching bound key and ath", true, true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, err := sdk.New(sdk.Config{
+				StoreID: "tenant-a", Issuer: factory.Issuer(), JWKSUrl: factory.JWKSUrl(),
+				Audience: "game", RequireDPoP: tc.requireDPoP,
+			})
+			if err != nil {
+				t.Fatalf("sdk.New: %v", err)
+			}
+			t.Cleanup(engine.Close)
+			options := []atoltest.TokenOption{
+				atoltest.WithOrgID("tenant-a"), atoltest.WithAudience("game"),
+			}
+			if tc.bound {
+				options = append(options, atoltest.WithDPoPBinding(prover.JKT()))
+			}
+			token := factory.MintToken(options...)
+			proofToken := token
+			if tc.omitATH {
+				proofToken = ""
+			}
+			proof, err := prover.Proof(http.MethodGet, url, proofToken)
+			if err != nil {
+				t.Fatalf("Proof: %v", err)
+			}
+			called := false
+			handler := HTTPMiddleware(engine)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("Authorization", "DPoP "+token)
+			req.Header.Set("DPoP", proof)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			if called != tc.wantAccept {
+				t.Errorf("handler called = %v, want %v; status = %d", called, tc.wantAccept, response.Code)
+			}
+			if !tc.wantAccept && response.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", response.Code)
+			}
+		})
 	}
 }
 

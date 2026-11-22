@@ -72,11 +72,10 @@ func ContextWithClaims(ctx context.Context, c *atolidentity.AtolClaims) context.
 	return context.WithValue(ctx, claimsContextKey, c)
 }
 
-// ContextMarkDPoPVerified marks the request as having a valid DPoP proof
-// attached that matched the access token's cnf.jkt binding. The HTTP
-// middleware sets this after the proof validator succeeds so higher-level
-// interceptors (Connect, gRPC) can trust that sender-constraint has
-// already been enforced at the transport layer.
+// ContextMarkDPoPVerified records that an upstream component verified a DPoP
+// proof. The SDK's Connect and gRPC interceptors require their own private
+// HTTP middleware marker bound to the engine and token; this public context
+// flag alone does not satisfy their proof requirement.
 func ContextMarkDPoPVerified(ctx context.Context) context.Context {
 	return context.WithValue(ctx, dpopVerifiedContextKey, true)
 }

@@ -41,8 +41,9 @@ type Config struct {
 	// (e.g., "https://api.example.com").
 	Audience string
 
-	// AllowTestTokens permits isolated test-user grant tokens. Production
-	// resource servers must leave this false and set their expected audience.
+	// AllowTestTokens permits isolated test-user grant tokens only when StoreID,
+	// Issuer, and Audience are pinned and the revocation snapshot is fresh.
+	// Production resource servers must leave this false.
 	AllowTestTokens bool
 
 	// JWKSUrl is the JWKS endpoint URL. Defaults to ControlPlaneURL + "/.well-known/jwks.json".

@@ -157,6 +157,9 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	}
 
 	config.defaults()
+	if config.AllowTestTokens && config.StoreID == "" {
+		return nil, fmt.Errorf("test-token acceptance requires a canonical store ID")
+	}
 	if config.DisableSync && !no.localOnly && config.ControlPlaneURL != "" && config.StoreID != "" {
 		return nil, fmt.Errorf("disable sync is incompatible with tenant serving lease enforcement")
 	}
@@ -189,7 +192,7 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	if config.JWKSUrl != "" {
 		var validatorOptions []ValidatorOption
 		if config.AllowTestTokens {
-			validatorOptions = append(validatorOptions, WithAllowTestTokens())
+			validatorOptions = append(validatorOptions, WithAllowTestTokens(), WithExpectedOrgID(config.StoreID))
 		}
 		validator = NewTokenValidator(config.JWKSUrl, config.Issuer, config.Audience, validatorOptions...)
 	}
@@ -269,6 +272,7 @@ func New(config Config, opts ...NewOption) (*Atol, error) {
 	if dpopMetricsColl != nil {
 		dpopOpts = append(dpopOpts, withDPoPMetrics(dpopMetricsColl))
 	}
+	dpopOpts = append(dpopOpts, WithRequireATH())
 
 	a := &Atol{
 		config:              config,

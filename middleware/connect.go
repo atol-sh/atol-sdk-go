@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -10,67 +11,83 @@ import (
 	"atol.sh/sdk-go"
 )
 
-// ConnectInterceptor returns a Connect-go unary interceptor that validates
-// Bearer or DPoP tokens and sets the principal, identity, and claims in
+// ConnectInterceptor returns a Connect-go interceptor that validates Bearer
+// or DPoP tokens on unary and streaming handlers and sets authentication in
 // context.
 //
-// DPoP note: Connect interceptors run after HTTP middleware, so if an
-// upstream HTTPMiddleware already populated the principal (including
-// proof validation), this interceptor is a cheap pass-through. When
-// no HTTP middleware is wrapped, this interceptor still accepts the
-// DPoP scheme for token extraction, but a DPoP-bound token (cnf.jkt
-// present) is rejected unless the proof was already verified upstream.
+// DPoP note: Connect interceptors run after HTTP middleware and validate the
+// token again. A DPoP-scheme or DPoP-bound token requires a proof verified
+// by HTTPMiddleware for the same engine and token.
 // This is because Connect's interceptor cannot reliably reconstruct
 // the HTTP `htu` claim that the client signed the proof with.
-func ConnectInterceptor(engine *sdk.Atol) connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			// Fast path: upstream HTTP middleware has already set the
-			// principal on the context. Everything is done.
-			if _, ok := sdk.UserFromContext(ctx); ok {
-				return next(ctx, req)
-			}
+func ConnectInterceptor(engine *sdk.Atol) connect.Interceptor {
+	return &connectAuthInterceptor{engine: engine}
+}
 
-			scheme, token := extractAuthTokenFromHeaders(req.Header())
-			if token == "" {
-				return nil, connect.NewError(connect.CodeUnauthenticated, nil)
-			}
-			if engine.RequireDPoP() && !strings.EqualFold(scheme, "DPoP") {
-				return nil, connect.NewError(connect.CodeUnauthenticated,
-					errors.New("DPoP scheme required"))
-			}
+type connectAuthInterceptor struct{ engine *sdk.Atol }
 
-			v := engine.Validator()
-			if v == nil {
-				// No validator configured -- fail closed. Accepting tokens
-				// without validation would be fail-open authentication.
-				engine.Logger().Error("connect auth interceptor rejecting request: no token validator configured (set Config.JWKSUrl)")
-				return nil, connect.NewError(connect.CodeUnauthenticated,
-					errors.New("token validation not configured"))
-			}
-
-			principal, identity, claims, _, err := v.ValidateToken(ctx, token)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeUnauthenticated, err)
-			}
-
-			// Reject DPoP-bound tokens that slipped in without HTTP-layer
-			// proof validation. Doing the proof check here would require
-			// reconstructing the htu from Connect's Spec, which is brittle
-			// across reverse proxies and path mounts. Require HTTPMiddleware.
-			if claims != nil && claims.Cnf != nil && claims.Cnf.JKT != "" && !sdk.IsDPoPVerified(ctx) {
-				return nil, connect.NewError(connect.CodeUnauthenticated,
-					errors.New("DPoP-bound token requires HTTP middleware"))
-			}
-
-			ctx = sdk.ContextWithUser(ctx, principal)
-			ctx = sdk.ContextWithClaims(ctx, claims)
-			if identity != nil {
-				ctx = sdk.ContextWithIdentity(ctx, *identity)
-			}
-			return next(ctx, req)
+func (i *connectAuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		ctx, err := i.authenticate(ctx, req.Header(), false)
+		if err != nil {
+			return nil, err
 		}
+		return next(ctx, req)
 	}
+}
+
+func (i *connectAuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
+func (i *connectAuthInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		ctx, err := i.authenticate(ctx, conn.RequestHeader(), true)
+		if err != nil {
+			return err
+		}
+		return next(ctx, conn)
+	}
+}
+
+func (i *connectAuthInterceptor) authenticate(ctx context.Context, headers http.Header, streaming bool) (context.Context, error) {
+	scheme, token := extractAuthTokenFromHeaders(headers)
+	if token == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, nil)
+	}
+	if i.engine.RequireDPoP() && !strings.EqualFold(scheme, "DPoP") {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("DPoP scheme required"))
+	}
+
+	v := i.engine.Validator()
+	if v == nil {
+		i.engine.Logger().Error("connect auth interceptor rejecting request: no token validator configured (set Config.JWKSUrl)")
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("token validation not configured"))
+	}
+	principal, identity, claims, sessionID, err := v.ValidateToken(ctx, token)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+	if streaming && claims != nil && (claims.TestUser || claims.AuthMethod == "test") {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("test-user tokens cannot open streams"))
+	}
+	if err := i.engine.CheckTokenSession(claims, sessionID); err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+	// Connect cannot reliably reconstruct the proof's htu across proxy
+	// mounts. Require HTTPMiddleware to verify DPoP for this engine/token.
+	clientIP, dpopVerified := verifiedHTTPAuth(ctx, i.engine, token)
+	bound := claims != nil && claims.Cnf != nil && claims.Cnf.JKT != ""
+	if (bound || strings.EqualFold(scheme, "DPoP")) && !dpopVerified {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("DPoP token requires HTTP middleware"))
+	}
+	principal.ClientIP = clientIP
+	ctx = sdk.ContextWithUser(ctx, principal)
+	ctx = sdk.ContextWithClaims(ctx, claims)
+	if identity != nil {
+		ctx = sdk.ContextWithIdentity(ctx, *identity)
+	}
+	return ctx, nil
 }
 
 func extractBearerFromHeaders(h interface{ Get(string) string }) string {

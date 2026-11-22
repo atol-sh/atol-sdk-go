@@ -9,6 +9,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	sdk "atol.sh/sdk-go"
 	apiv1 "atol.sh/sdk-go/gen/go/atol/api/v1"
@@ -94,6 +95,7 @@ func TestSessionValidator_RefreshSuccess(t *testing.T) {
 		}
 		return &apiv1.ListRevokedSessionsResponse{
 			RevokedSessionIds: []string{"jti-revoked-1", "jti-revoked-2"},
+			AsOf:              timestamppb.Now(),
 		}, nil
 	}}
 	srv := newCRLServer(t, stub)
@@ -144,6 +146,110 @@ func TestSessionValidator_Unauthenticated_Unhealthy(t *testing.T) {
 	}
 }
 
+func TestSessionValidator_SaturatedSnapshotFailsClosed(t *testing.T) {
+	ids := make([]string, 10000)
+	for i := range ids {
+		ids[i] = "session"
+	}
+	stub := &crlStub{list: func(*apiv1.ListRevokedSessionsRequest, http.Header) (*apiv1.ListRevokedSessionsResponse, error) {
+		return &apiv1.ListRevokedSessionsResponse{RevokedSessionIds: ids, AsOf: timestamppb.Now()}, nil
+	}}
+	srv := newCRLServer(t, stub)
+	sv := newValidator(t, srv.URL, srv.Client(), "org-1", time.Hour)
+	startOnce(t, sv)
+	if sv.Healthy() || sv.FreshAndNotRevoked("unlisted") {
+		t.Error("saturated snapshot was accepted as complete")
+	}
+	if !sv.RejectsSession("session") || !sv.RejectsSession("unlisted") {
+		t.Error("saturated snapshot allowed a session with an incomplete deny list")
+	}
+}
+
+func TestSessionValidator_InvalidAsOfFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		asOf *timestamppb.Timestamp
+	}{
+		{"missing", nil},
+		{"stale", timestamppb.New(time.Now().Add(-2 * time.Minute))},
+		{"future", timestamppb.New(time.Now().Add(time.Minute))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &crlStub{list: func(*apiv1.ListRevokedSessionsRequest, http.Header) (*apiv1.ListRevokedSessionsResponse, error) {
+				return &apiv1.ListRevokedSessionsResponse{
+					AsOf: tc.asOf, RevokedSessionIds: []string{"listed"},
+				}, nil
+			}}
+			srv := newCRLServer(t, stub)
+			sv := newValidator(t, srv.URL, srv.Client(), "org-1", time.Hour)
+			startOnce(t, sv)
+			if sv.Healthy() || sv.FreshAndNotRevoked("unlisted") {
+				t.Error("invalid as-of snapshot was accepted")
+			}
+			if !sv.RejectsSession("listed") || !sv.RejectsSession("unlisted") {
+				t.Error("invalid as-of snapshot allowed a session with an unusable deny list")
+			}
+		})
+	}
+}
+
+func TestSessionValidator_RegressedAsOfFailsClosed(t *testing.T) {
+	newer := timestamppb.Now()
+	older := timestamppb.New(time.Now().Add(-5 * time.Second))
+	var calls atomic.Int32
+	stub := &crlStub{list: func(*apiv1.ListRevokedSessionsRequest, http.Header) (*apiv1.ListRevokedSessionsResponse, error) {
+		if calls.Add(1) == 1 {
+			return &apiv1.ListRevokedSessionsResponse{
+				RevokedSessionIds: []string{"revoked"}, AsOf: newer,
+			}, nil
+		}
+		return &apiv1.ListRevokedSessionsResponse{AsOf: older}, nil
+	}}
+	srv := newCRLServer(t, stub)
+	sv := newValidator(t, srv.URL, srv.Client(), "org-1", 20*time.Millisecond)
+	startOnce(t, sv)
+	if !sv.Healthy() || !sv.IsRevoked("revoked") {
+		t.Fatal("initial complete snapshot was not accepted")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if calls.Load() >= 2 && sv.LastRefreshError() != nil {
+			if sv.Healthy() || !sv.RejectsSession("unlisted") {
+				t.Error("regressed snapshot allowed a session")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("regressed snapshot was not observed")
+}
+
+func TestSessionValidator_ResourceExhaustedDenyAllAndRecovery(t *testing.T) {
+	var exhausted atomic.Bool
+	exhausted.Store(true)
+	stub := &crlStub{list: func(*apiv1.ListRevokedSessionsRequest, http.Header) (*apiv1.ListRevokedSessionsResponse, error) {
+		if exhausted.Load() {
+			return nil, connect.NewError(connect.CodeResourceExhausted, nil)
+		}
+		return &apiv1.ListRevokedSessionsResponse{AsOf: timestamppb.Now()}, nil
+	}}
+	srv := newCRLServer(t, stub)
+	sv := newValidator(t, srv.URL, srv.Client(), "org-1", 20*time.Millisecond)
+	startOnce(t, sv)
+	if !sv.RejectsSession("unlisted") || sv.Healthy() {
+		t.Fatal("resource-exhausted cold snapshot allowed an ordinary session")
+	}
+	exhausted.Store(false)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sv.Healthy() && !sv.RejectsSession("unlisted") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("complete refresh did not clear the deny-all state")
+}
+
 func TestSessionValidator_NetworkError_Unhealthy(t *testing.T) {
 	// Point at a server that is already closed -- guaranteed connection error.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -168,7 +274,7 @@ func TestSessionValidator_RecoversAfterFailure(t *testing.T) {
 		if fail.Load() {
 			return nil, connect.NewError(connect.CodeInternal, nil)
 		}
-		return &apiv1.ListRevokedSessionsResponse{RevokedSessionIds: []string{"jti-x"}}, nil
+		return &apiv1.ListRevokedSessionsResponse{RevokedSessionIds: []string{"jti-x"}, AsOf: timestamppb.Now()}, nil
 	}}
 	srv := newCRLServer(t, stub)
 

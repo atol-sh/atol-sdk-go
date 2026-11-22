@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "atol.sh/sdk-go"
 	"atol.sh/sdk-go/atoltest"
@@ -98,12 +99,15 @@ func TestTokenValidatorRejectsTestTokensByDefault(t *testing.T) {
 			t.Errorf("test token error = %v, want ErrTestTokenRejected", err)
 		}
 	}
-	allow := sdk.NewTokenValidator(factory.JWKSUrl(), factory.Issuer(), "game", sdk.WithAllowTestTokens())
-	_, _, claims, _, err := allow.ValidateToken(context.Background(), factory.MintToken(atoltest.WithTestUser(), atoltest.WithAudience("game")))
+	allow := sdk.NewTokenValidator(factory.JWKSUrl(), factory.Issuer(), "game",
+		sdk.WithAllowTestTokens(), sdk.WithExpectedOrgID("tenant-a"))
+	_, _, claims, _, err := allow.ValidateToken(context.Background(), factory.MintToken(
+		atoltest.WithTestUser(), atoltest.WithAudience("game"), atoltest.WithOrgID("tenant-a")))
 	if err != nil || !claims.TestUser {
 		t.Fatalf("allowed test token claims = %+v, %v", claims, err)
 	}
-	_, _, _, _, err = allow.ValidateToken(context.Background(), factory.MintToken(atoltest.WithTestUser(), atoltest.WithAudience("other")))
+	_, _, _, _, err = allow.ValidateToken(context.Background(), factory.MintToken(
+		atoltest.WithTestUser(), atoltest.WithAudience("other"), atoltest.WithOrgID("tenant-a")))
 	if err == nil || strings.Contains(err.Error(), "ErrTestTokenRejected") {
 		t.Fatalf("wrong audience error = %v, want audience denial", err)
 	}
@@ -111,5 +115,77 @@ func TestTokenValidatorRejectsTestTokensByDefault(t *testing.T) {
 	_, _, _, _, err = noAudience.ValidateToken(context.Background(), factory.MintToken(atoltest.WithTestUser()))
 	if !errors.Is(err, sdk.ErrTestTokenRejected) {
 		t.Fatalf("test token without configured audience error = %v", err)
+	}
+	for _, tc := range []struct {
+		name      string
+		validator *sdk.TokenValidator
+		orgID     string
+	}{
+		{"missing expected tenant", sdk.NewTokenValidator(factory.JWKSUrl(), factory.Issuer(), "game", sdk.WithAllowTestTokens()), "tenant-a"},
+		{"wrong tenant", allow, "tenant-b"},
+		{"missing claim", allow, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, err := tc.validator.ValidateToken(context.Background(), factory.MintToken(
+				atoltest.WithTestUser(), atoltest.WithAudience("game"), atoltest.WithOrgID(tc.orgID)))
+			if !errors.Is(err, sdk.ErrTestTokenRejected) {
+				t.Errorf("tenant %q error = %v, want ErrTestTokenRejected", tc.orgID, err)
+			}
+		})
+	}
+}
+
+func TestAtolNewPinsTestTokensToConfiguredTenant(t *testing.T) {
+	t.Parallel()
+	if _, err := sdk.New(sdk.Config{AllowTestTokens: true}); err == nil {
+		t.Fatal("test-token SDK without StoreID was accepted")
+	}
+	factory := atoltest.NewTokenFactory(t)
+	engine, err := sdk.New(sdk.Config{
+		StoreID: "tenant-a", Issuer: factory.Issuer(), JWKSUrl: factory.JWKSUrl(),
+		Audience: "game", AllowTestTokens: true,
+	})
+	if err != nil {
+		t.Fatalf("sdk.New: %v", err)
+	}
+	t.Cleanup(engine.Close)
+	for _, tc := range []struct {
+		orgID     string
+		wantError bool
+	}{
+		{"tenant-a", false},
+		{"tenant-b", true},
+		{"", true},
+	} {
+		_, _, _, _, err := engine.Validator().ValidateToken(context.Background(), factory.MintToken(
+			atoltest.WithTestUser(), atoltest.WithOrgID(tc.orgID), atoltest.WithAudience("game")))
+		if (err != nil) != tc.wantError {
+			t.Errorf("org %q validation error = %v, wantError %v", tc.orgID, err, tc.wantError)
+		}
+	}
+}
+
+func TestTokenValidatorRejectsExpiredTestTokensWithoutLeeway(t *testing.T) {
+	t.Parallel()
+	factory := atoltest.NewTokenFactory(t)
+	validator := sdk.NewTokenValidator(factory.JWKSUrl(), factory.Issuer(), "game",
+		sdk.WithAllowTestTokens(), sdk.WithExpectedOrgID("tenant-a"))
+	for _, tc := range []struct {
+		name    string
+		options []atoltest.TokenOption
+	}{
+		{"test marker", []atoltest.TokenOption{atoltest.WithTestUser()}},
+		{"test auth method", []atoltest.TokenOption{atoltest.WithAuthMethod("test")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := append([]atoltest.TokenOption{
+				atoltest.WithOrgID("tenant-a"), atoltest.WithAudience("game"),
+				atoltest.WithExpiry(-5 * time.Second),
+			}, tc.options...)
+			_, _, _, _, err := validator.ValidateToken(context.Background(), factory.MintToken(options...))
+			if !errors.Is(err, sdk.ErrTestTokenRejected) {
+				t.Errorf("expired test token error = %v, want ErrTestTokenRejected", err)
+			}
+		})
 	}
 }

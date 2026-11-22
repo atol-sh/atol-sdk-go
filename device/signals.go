@@ -54,15 +54,9 @@ func isBrowserNavigation(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("Sec-Fetch-Dest"), "document")
 }
 
-// clientIP extracts the client IP from the request, honoring X-Forwarded-For
-// (first hop) when present, otherwise the remote address.
+// clientIP returns the direct peer address. Forwarded headers are untrusted
+// unless the application validates its own trusted proxy chain.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

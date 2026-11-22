@@ -19,7 +19,7 @@ import (
 //  3. For DPoP-scheme tokens, validates the `DPoP` proof header against
 //     the token's `cnf.jkt` binding.
 //  4. Sets the principal, identity, and claims in context.
-//  5. Populates ClientIP from request headers.
+//  5. Populates ClientIP from the direct peer address.
 func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,12 +54,9 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Check session revocation list (CRL).
-			if sv := engine.SessionValidator(); sv != nil && sessionID != "" {
-				if sv.IsRevoked(sessionID) {
-					http.Error(w, "session revoked", http.StatusUnauthorized)
-					return
-				}
+			if err := engine.CheckTokenSession(claims, sessionID); err != nil {
+				http.Error(w, "session rejected", http.StatusUnauthorized)
+				return
 			}
 
 			// Session-device drift: flag a token presented from a client whose
@@ -74,12 +71,16 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 			if claims != nil && claims.Cnf != nil {
 				boundJKT = claims.Cnf.JKT
 			}
+			if boundJKT == "" && strings.EqualFold(scheme, "DPoP") {
+				// A proof signed by any key cannot sender-constrain an
+				// access token that lacks its matching cnf.jkt claim.
+				sdk.WriteDPoPChallenge(w, nil, sdk.WithInvalidProofError())
+				return
+			}
 			dpopOK := false
 			if boundJKT != "" || strings.EqualFold(scheme, "DPoP") {
-				// Either the token was issued with a binding (cnf.jkt set)
-				// OR the client explicitly opted into DPoP scheme on the
-				// wire. Both cases require a valid DPoP proof. Pass the
-				// extracted access token so the proof's `ath` claim is
+				// A bound token requires a valid DPoP proof. Pass the
+				// access token so the proof's `ath` claim is
 				// verified against it (RFC 9449 section 7.1).
 				if _, derr := engine.DPoPValidator().Validate(r, boundJKT, token); derr != nil {
 					// RFC 9449 section 7.1 challenge; never echo derr on the
@@ -92,7 +93,8 @@ func HTTPMiddleware(engine *sdk.Atol) func(http.Handler) http.Handler {
 
 			principal.ClientIP = clientIP
 
-			ctx := sdk.ContextWithUser(r.Context(), principal)
+			ctx := markHTTPAuth(r.Context(), engine, token, clientIP, dpopOK)
+			ctx = sdk.ContextWithUser(ctx, principal)
 			ctx = sdk.ContextWithClaims(ctx, claims)
 			if identity != nil {
 				ctx = sdk.ContextWithIdentity(ctx, *identity)
@@ -135,24 +137,9 @@ func extractBearerToken(r *http.Request) string {
 	return tok
 }
 
-// extractClientIP returns the client IP from X-Forwarded-For, X-Real-IP,
-// or falls back to the remote address from the request.
+// extractClientIP returns the direct peer address. Forwarded headers are
+// untrusted unless the application validates its own trusted proxy chain.
 func extractClientIP(r *http.Request) string {
-	// Prefer X-Forwarded-For (first entry is the original client).
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
-		}
-	}
-
-	// Fall back to X-Real-IP.
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-
-	// Fall back to RemoteAddr, stripping port.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

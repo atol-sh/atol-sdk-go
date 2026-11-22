@@ -131,8 +131,8 @@ func TestHTTPMiddleware_ValidToken_ClaimsInContext(t *testing.T) {
 	}
 }
 
-// TestHTTPMiddleware_XForwardedFor verifies that ClientIP is correctly
-// extracted from the X-Forwarded-For header through real JWT validation.
+// TestHTTPMiddleware_XForwardedFor verifies untrusted forwarding headers do
+// not override the direct peer IP after real JWT validation.
 func TestHTTPMiddleware_XForwardedFor(t *testing.T) {
 	engine := atoltest.NewEngine(t, atoltest.WithModel(testModel))
 	token := engine.Tokens().MintToken(atoltest.WithSubject("alice"))
@@ -153,7 +153,7 @@ func TestHTTPMiddleware_XForwardedFor(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 
-	if clientIP != "203.0.113.50" {
-		t.Errorf("ClientIP = %q, want %q", clientIP, "203.0.113.50")
+	if clientIP != "10.0.0.1" {
+		t.Errorf("ClientIP = %q, want %q", clientIP, "10.0.0.1")
 	}
 }

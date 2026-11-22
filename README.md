@@ -307,10 +307,21 @@ token, err := minter.Token(ctx, testUserID, "https://test-api.example.com", []st
 ```
 
 Token validation rejects test-user tokens by default. A test-only resource
-server can opt in with `sdk.WithAllowTestTokens()` and must configure the exact
-test issuer and audience. Production resource servers should configure their
-production issuer and audience and leave test-token acceptance disabled. These
-client APIs require the corresponding control-plane service release.
+server with private SDK-plane access can use `sdk.New` with its exact canonical
+`StoreID`, test issuer and audience, and `Config.AllowTestTokens`. Its HTTP,
+Connect, and gRPC middleware requires a recent complete revocation snapshot,
+checks the session ID, and rejects test tokens at their exact expiry. This
+built-in snapshot path uses the private `DPAgentService`; a public regional API
+URL and scoped machine key alone cannot reach it. Public customer services
+should use direct `NewTokenValidator` with `WithAllowTestTokens()` and
+`WithExpectedOrgID(canonicalTenantID)`, then enforce a fresh, complete
+`MachineUserClient.ListRevokedSessions` snapshot and session-ID rejection at
+each request boundary. Production resource servers should leave test-token
+acceptance disabled. Built-in Connect and gRPC streaming handlers reject
+test-user tokens because a stream could outlive the token or revocation
+snapshot. Plain HTTP handlers that upgrade or keep connections open must
+enforce token renewal or close those connections themselves. These client
+APIs require the corresponding control-plane service release.
 
 ## Authorization
 
@@ -377,20 +388,33 @@ import atolmw "atol.sh/sdk-go/middleware"
 // net/http
 handler = atolmw.HTTPMiddleware(atol)(handler)
 
-// gRPC
-grpc.NewServer(grpc.UnaryInterceptor(atolmw.GRPCUnaryInterceptor(atol)))
+// gRPC: register both shapes so streams cannot bypass authentication.
+grpc.NewServer(
+    grpc.UnaryInterceptor(atolmw.GRPCUnaryInterceptor(atol)),
+    grpc.StreamInterceptor(atolmw.GRPCStreamInterceptor(atol)),
+)
 
 // Connect-go
 connect.WithInterceptors(atolmw.ConnectInterceptor(atol))
 ```
 
+`ConnectInterceptor` now wraps both unary and streaming handlers. Code that
+called its former unary function directly must call
+`atolmw.ConnectInterceptor(atol).WrapUnary(next)`.
+
+`Principal.ClientIP` and the device divergence event's observed IP use the
+direct peer address (`RemoteAddr`) and ignore forwarded IP headers.
+Applications behind trusted proxies can resolve their verified client address
+separately.
+
 ## Sender-constrained tokens (DPoP)
 
 The SDK accepts both `Bearer` and `DPoP` authorization schemes. For a DPoP
 request it validates the proof JWT and binds it to the access token's `cnf.jkt`,
-so a stolen token cannot be replayed without the matching proof key. DPoP proof
-validation runs only on the HTTP middleware path (the gRPC and Connect
-interceptors reject DPoP-bound tokens with an explicit error). Set
+and requires `ath` to match the presented access token, so a stolen token
+cannot be replayed without the matching proof key. DPoP proof
+validation runs only on the HTTP middleware path. Connect and gRPC require
+that same HTTP middleware for any DPoP-scheme or DPoP-bound token. Set
 `Config.RequireDPoP = true` to reject plain Bearer tokens entirely once all your
 clients are DPoP-capable.
 

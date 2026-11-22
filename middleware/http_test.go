@@ -74,28 +74,28 @@ func TestExtractClientIP(t *testing.T) {
 		want       string
 	}{
 		{
-			name:       "X-Forwarded-For single IP",
+			name:       "ignores X-Forwarded-For single IP",
 			xff:        "192.168.1.1",
 			remoteAddr: "10.0.0.1:8080",
-			want:       "192.168.1.1",
+			want:       "10.0.0.1",
 		},
 		{
-			name:       "X-Forwarded-For multiple IPs takes first",
+			name:       "ignores X-Forwarded-For chain",
 			xff:        "  203.0.113.50 , 70.41.3.18, 150.172.238.178",
 			remoteAddr: "10.0.0.1:8080",
-			want:       "203.0.113.50",
+			want:       "10.0.0.1",
 		},
 		{
-			name:       "no XFF uses X-Real-IP",
+			name:       "ignores X-Real-IP",
 			xRealIP:    "172.16.0.5",
 			remoteAddr: "10.0.0.1:8080",
-			want:       "172.16.0.5",
+			want:       "10.0.0.1",
 		},
 		{
-			name:       "X-Real-IP with whitespace trimmed",
+			name:       "ignores X-Real-IP whitespace",
 			xRealIP:    "  172.16.0.5  ",
 			remoteAddr: "10.0.0.1:8080",
-			want:       "172.16.0.5",
+			want:       "10.0.0.1",
 		},
 		{
 			name:       "fallback to RemoteAddr strips port",
@@ -108,11 +108,11 @@ func TestExtractClientIP(t *testing.T) {
 			want:       "10.0.0.1",
 		},
 		{
-			name:       "XFF takes priority over X-Real-IP",
+			name:       "ignores both forwarded headers",
 			xff:        "1.2.3.4",
 			xRealIP:    "5.6.7.8",
 			remoteAddr: "10.0.0.1:8080",
-			want:       "1.2.3.4",
+			want:       "10.0.0.1",
 		},
 		{
 			name:       "IPv6 RemoteAddr with port",

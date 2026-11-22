@@ -33,6 +33,7 @@ type TokenValidator struct {
 	jwks            *atolidentity.JWKSFetcher
 	issuer          string
 	audience        string // optional: when set, JWT aud must contain this value
+	expectedOrgID   string // optional tenant pin for test-user tokens
 	requiredType    string // optional: when set, JWT header typ must equal this value
 	allowTestTokens bool
 }
@@ -50,11 +51,19 @@ func WithRequiredTokenType(typ string) ValidatorOption {
 	}
 }
 
-// WithAllowTestTokens enables tokens issued by the test-user grant. Only use it
-// for isolated test resources with an expected test issuer and audience.
+// WithAllowTestTokens enables tokens issued by the test-user grant. It requires
+// an expected issuer, audience, and canonical tenant from WithExpectedOrgID.
 func WithAllowTestTokens() ValidatorOption {
 	return func(v *TokenValidator) {
 		v.allowTestTokens = true
+	}
+}
+
+// WithExpectedOrgID binds accepted test-user tokens to one canonical tenant.
+// Atol.New supplies Config.StoreID; direct validators must provide this option.
+func WithExpectedOrgID(orgID string) ValidatorOption {
+	return func(v *TokenValidator) {
+		v.expectedOrgID = orgID
 	}
 }
 
@@ -111,12 +120,9 @@ func (v *TokenValidator) ValidateToken(ctx context.Context, rawToken string) (*P
 		return nil, nil, nil, "", fmt.Errorf("verify claims: %w", err)
 	}
 
-	// Validate standard claims with a 30s clock-skew tolerance. Without
-	// leeway a client whose clock is a second ahead of the server (or vice
-	// versa) fails validation right at the exp boundary; 30s matches common
-	// OIDC library defaults and absorbs both NTP jitter and small pauses
-	// between the SDK's proactive renew (fires 60s before exp) and the
-	// request actually hitting the resource server.
+	// Validate standard claims with a 30s clock-skew tolerance for ordinary
+	// tokens. Test-user tokens get a strict expiry check below because their
+	// revoked sessions leave the CRL at token expiry.
 	expected := gojosejwt.Expected{
 		Issuer: v.issuer,
 		Time:   time.Now(),
@@ -128,7 +134,12 @@ func (v *TokenValidator) ValidateToken(ctx context.Context, rawToken string) (*P
 		return nil, nil, nil, "", fmt.Errorf("validate claims: %w", err)
 	}
 	if (custom.TestUser || custom.AuthMethod == "test") &&
-		(!v.allowTestTokens || v.issuer == "" || v.audience == "") {
+		(!v.allowTestTokens || v.issuer == "" || v.audience == "" ||
+			v.expectedOrgID == "" || custom.OrgID != v.expectedOrgID) {
+		return nil, nil, nil, "", ErrTestTokenRejected
+	}
+	if (custom.TestUser || custom.AuthMethod == "test") &&
+		(standard.Expiry == nil || !standard.Expiry.Time().After(time.Now())) {
 		return nil, nil, nil, "", ErrTestTokenRejected
 	}
 
