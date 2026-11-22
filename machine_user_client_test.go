@@ -184,6 +184,37 @@ func TestMachineUserClientRejectsIncompleteRevocationSnapshot(t *testing.T) {
 	}
 }
 
+func TestMachineRevocationsFreshAt(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.November, 22, 6, 0, 0, 0, time.UTC)
+	maxAge := 15 * time.Minute
+	tests := []struct {
+		name     string
+		snapshot *sdk.MachineRevocations
+		now      time.Time
+		maxAge   time.Duration
+		want     bool
+	}{
+		{name: "current", snapshot: &sdk.MachineRevocations{AsOf: now}, now: now, maxAge: maxAge, want: true},
+		{name: "at limit", snapshot: &sdk.MachineRevocations{AsOf: now.Add(-maxAge)}, now: now, maxAge: maxAge, want: true},
+		{name: "stale", snapshot: &sdk.MachineRevocations{AsOf: now.Add(-maxAge - time.Nanosecond)}, now: now, maxAge: maxAge},
+		{name: "beyond duration range", snapshot: &sdk.MachineRevocations{AsOf: now.AddDate(-300, 0, 0)}, now: now, maxAge: time.Duration(1<<63 - 1)},
+		{name: "future", snapshot: &sdk.MachineRevocations{AsOf: now.Add(time.Nanosecond)}, now: now, maxAge: maxAge},
+		{name: "missing snapshot", now: now, maxAge: maxAge},
+		{name: "missing timestamp", snapshot: &sdk.MachineRevocations{}, now: now, maxAge: maxAge},
+		{name: "missing current time", snapshot: &sdk.MachineRevocations{AsOf: now}, maxAge: maxAge},
+		{name: "invalid maximum age", snapshot: &sdk.MachineRevocations{AsOf: now}, now: now},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.snapshot.FreshAt(tt.now, tt.maxAge); got != tt.want {
+				t.Errorf("FreshAt() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMachineUserClientRejectsUnsafeInputAndReportsCode(t *testing.T) {
 	t.Parallel()
 	if _, err := sdk.NewMachineUserClient(sdk.Config{ControlPlaneURL: "http://api.example.com", StoreID: "t", KeyID: "k", SecretKey: "s"}, nil); err == nil {

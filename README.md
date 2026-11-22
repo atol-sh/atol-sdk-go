@@ -288,7 +288,9 @@ uncertain response with the same issuing API key and idempotency key.
 including `EmailVerified`; use an overlapping time window and periodic full
 walk because this is not a commit-ordered change feed. A key with
 `sessions:revocations:read` can call `ListRevokedSessions(ctx)` and must refuse
-tokens when the returned `AsOf` becomes stale or a refresh fails.
+tokens when a refresh fails or `snapshot.FreshAt(time.Now(), maxAge)` is false.
+`FreshAt` rejects both stale and future timestamps; select `maxAge` to match
+the resource server's maximum tolerated authorization-state age.
 
 An isolated test tenant can use a separate confidential OIDC client to mint an
 access-only token for an existing test-marked user. Atol staff create the
