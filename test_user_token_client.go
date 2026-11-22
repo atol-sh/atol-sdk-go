@@ -65,7 +65,7 @@ func (c *TestUserTokenClient) Token(ctx context.Context, userID, audience string
 		RefreshToken json.RawMessage `json:"refresh_token"`
 		IDToken      json.RawMessage `json:"id_token"`
 	}
-	if err := serviceRequest(ctx, c.http, c.issuer+"/auth/token", "application/x-www-form-urlencoded", []byte(form.Encode()), &response); err != nil {
+	if err := serviceRequest(ctx, c.http, c.issuer+"/auth/token", "application/x-www-form-urlencoded", "", []byte(form.Encode()), &response); err != nil {
 		return nil, err
 	}
 	if len(response.RefreshToken) != 0 || len(response.IDToken) != 0 ||

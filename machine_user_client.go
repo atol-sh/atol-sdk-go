@@ -98,7 +98,7 @@ func (c *MachineUserClient) call(ctx context.Context, method string, input, outp
 	if err != nil {
 		return fmt.Errorf("encode machine user request: %w", err)
 	}
-	return serviceRequest(ctx, c.http, c.baseURL+machineUserServicePath+method, "application/json", body, output)
+	return serviceRequest(ctx, c.http, c.baseURL+machineUserServicePath+method, "application/json", c.orgID, body, output)
 }
 
 func (c *MachineUserClient) CreateUser(ctx context.Context, input CreateMachineUserInput) (*MachineUser, error) {

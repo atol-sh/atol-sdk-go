@@ -61,13 +61,16 @@ func serviceHTTPClient(base *http.Client) *http.Client {
 	return client
 }
 
-func serviceRequest(ctx context.Context, client *http.Client, endpoint, contentType string, body []byte, output any) error {
+func serviceRequest(ctx context.Context, client *http.Client, endpoint, contentType, orgID string, body []byte, output any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create Atol service request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
+	if orgID != "" {
+		req.Header.Set("X-Atol-Org-Id", orgID)
+	}
 	if contentType == "application/json" {
 		req.Header.Set("Connect-Protocol-Version", "1")
 	}

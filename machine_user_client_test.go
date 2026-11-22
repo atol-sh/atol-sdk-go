@@ -32,6 +32,9 @@ func TestMachineUserClientCallsScopedService(t *testing.T) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("content type = %q, want application/json", r.Header.Get("Content-Type"))
 		}
+		if got := r.Header.Get("X-Atol-Org-Id"); got != "tenant-1" {
+			t.Errorf("organization header = %q, want tenant-1", got)
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("read request: %v", err)

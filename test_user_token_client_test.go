@@ -18,6 +18,9 @@ func TestTestUserTokenClientAccessOnly(t *testing.T) {
 		if r.URL.Path != "/auth/token" || r.Method != http.MethodPost {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
+		if got := r.Header.Get("X-Atol-Org-Id"); got != "" {
+			t.Errorf("token request organization header = %q, want empty", got)
+		}
 		if err := r.ParseForm(); err != nil {
 			t.Errorf("parse form: %v", err)
 		}
