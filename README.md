@@ -292,6 +292,17 @@ tokens when a refresh fails or `snapshot.FreshAt(time.Now(), maxAge)` is false.
 `FreshAt` rejects both stale and future timestamps; select `maxAge` to match
 the resource server's maximum tolerated authorization-state age.
 
+To check tenant serving state alongside session revocations, add the
+`tenant:serving-lease:read` scope. Pass a fresh challenge to
+`GetTenantServingLease(ctx, challenge)` on each call. Generate 32 bytes with
+`crypto/rand` and encode them with `base64.RawURLEncoding`. An active reply's
+`Deadline` is local and monotonic. Enforce it at each protected decision and
+check the independent revocation snapshot. A restricted reply clears the lease
+and wins at an equal epoch. Only a strictly newer active epoch clears a known
+restriction. Clear immediately on `unauthenticated`, `permission_denied` or
+`invalid_argument`. A timeout or `unavailable` leaves the original deadline in
+force. The SDK validates each reply and the caller tracks these transitions.
+
 An isolated test tenant can use a separate confidential OIDC client to mint an
 access-only token for an existing test-marked user. Atol staff create the
 immutable test tenant, and a platform administrator designates the test user;
